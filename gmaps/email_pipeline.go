@@ -97,6 +97,15 @@ func (p *EmailPipeline) Run(ctx context.Context) error {
 
 	// --- Level 2: fetch each contact page via HTTP ---
 	for _, pageURL := range p.contactPages {
+		select {
+		case <-ctx.Done():
+			p.entry.Emails = []string{}
+			p.entry.EmailStatus = "not_found"
+
+			return nil
+		default:
+		}
+
 		pageBody, fetchErr := p.fetchWithRetry(ctx, pageURL, maxRetryLevel2)
 		if fetchErr != nil {
 			continue
@@ -134,6 +143,15 @@ func (p *EmailPipeline) Run(ctx context.Context) error {
 		}
 
 		for i := 0; i < limit; i++ {
+			select {
+			case <-ctx.Done():
+				p.entry.Emails = []string{}
+				p.entry.EmailStatus = "not_found"
+
+				return nil
+			default:
+			}
+
 			pageHTML, browserErr := p.browserFetcher.FetchWithBrowser(ctx, p.contactPages[i])
 			if browserErr != nil || pageHTML == "" {
 				continue
@@ -214,25 +232,31 @@ func (p *EmailPipeline) fetchPage(ctx context.Context, url string) ([]byte, erro
 	return body, nil
 }
 
-// extractEmails tries both goquery-based and regex-based extraction.
+// extractEmails tries goquery-based extraction first; only if it finds
+// nothing does it fall back to regex on the raw HTML. This avoids false
+// positives from script/style tags that the regex would otherwise match.
 // It returns the deduplicated email list and the parsed document (which
 // may be nil if parsing failed).
 func (p *EmailPipeline) extractEmails(body []byte) ([]string, *goquery.Document) {
-	var allEmails []string
-
 	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 	if err == nil {
-		allEmails = append(allEmails, extractEmailsFromDoc(doc)...)
+		if docEmails := filterValid(extractEmailsFromDoc(doc)); len(docEmails) > 0 {
+			return docEmails, doc
+		}
 	}
 
-	// Regex fallback on raw bytes.
-	htmlEmails := extractEmailsFromHTML(body)
-	allEmails = append(allEmails, htmlEmails...)
+	// Regex fallback on raw bytes — only reached when goquery found nothing.
+	if htmlEmails := filterValid(extractEmailsFromHTML(body)); len(htmlEmails) > 0 {
+		return htmlEmails, doc
+	}
 
-	deduped := deduplicateEmails(allEmails)
+	return nil, doc
+}
 
-	// Filter out any emails whose domain matches the blocked lists
-	// (already handled by the helpers, but let's make sure).
+// filterValid deduplicates and validates a list of emails.
+func filterValid(emails []string) []string {
+	deduped := deduplicateEmails(emails)
+
 	var valid []string
 
 	for _, e := range deduped {
@@ -241,14 +265,5 @@ func (p *EmailPipeline) extractEmails(body []byte) ([]string, *goquery.Document)
 		}
 	}
 
-	if len(valid) == 0 {
-		return nil, doc
-	}
-
-	return valid, doc
-}
-
-// ContactPages returns the contact page URLs discovered during the pipeline run.
-func (p *EmailPipeline) ContactPages() []string {
-	return p.contactPages
+	return valid
 }

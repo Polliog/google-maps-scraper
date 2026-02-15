@@ -90,6 +90,37 @@ func TestEmailPipelineWebsiteError(t *testing.T) {
 	require.Equal(t, "website_error", entry.EmailStatus)
 }
 
+type mockBrowserFetcher struct {
+	html string
+	err  error
+}
+
+func (m *mockBrowserFetcher) FetchWithBrowser(ctx context.Context, url string) (string, error) {
+	return m.html, m.err
+}
+
+func TestEmailPipelineBrowserFallback(t *testing.T) {
+	// HTTP server returns no emails
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<html><body><p>No emails here</p></body></html>`))
+	}))
+	defer srv.Close()
+
+	fetcher := &mockBrowserFetcher{
+		html: `<html><body><a href="mailto:browser@biz.com">Email</a></body></html>`,
+	}
+
+	entry := &Entry{WebSite: srv.URL}
+	pipeline := NewEmailPipeline(entry, fetcher)
+
+	err := pipeline.Run(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []string{"browser@biz.com"}, entry.Emails)
+	require.Equal(t, "found", entry.EmailStatus)
+	require.Equal(t, "browser_homepage", entry.EmailSource)
+}
+
 func TestEmailPipelineRegexFallback(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
