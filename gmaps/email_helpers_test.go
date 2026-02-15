@@ -1,8 +1,10 @@
 package gmaps
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/stretchr/testify/require"
 )
 
@@ -94,6 +96,124 @@ func TestDeduplicateEmails(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := deduplicateEmails(tt.input)
+			require.Equal(t, tt.expect, got)
+		})
+	}
+}
+
+func TestExtractEmailsFromDoc(t *testing.T) {
+	tests := []struct {
+		name   string
+		html   string
+		expect []string
+	}{
+		{
+			name: "finds mailto links",
+			html: `<html><body>
+				<a href="mailto:contact@business.com">Contact Us</a>
+				<a href="mailto:sales@business.com?subject=Hello">Sales</a>
+			</body></html>`,
+			expect: []string{"contact@business.com", "sales@business.com"},
+		},
+		{
+			name: "finds emails in visible text when no mailto links",
+			html: `<html><body>
+				<p>Reach us at support@company.org for help.</p>
+			</body></html>`,
+			expect: []string{"support@company.org"},
+		},
+		{
+			name: "excludes noreply and blocked domain emails",
+			html: `<html><body>
+				<a href="mailto:noreply@business.com">No Reply</a>
+				<a href="mailto:user@example.com">Example</a>
+				<a href="mailto:real@business.com">Real</a>
+			</body></html>`,
+			expect: []string{"real@business.com"},
+		},
+		{
+			name: "deduplicates results",
+			html: `<html><body>
+				<a href="mailto:info@business.com">Info</a>
+				<a href="mailto:INFO@business.com">Info Again</a>
+				<p>Contact info@business.com</p>
+			</body></html>`,
+			expect: []string{"info@business.com"},
+		},
+		{
+			name:   "returns nil for no emails",
+			html:   `<html><body><p>No emails here</p></body></html>`,
+			expect: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(tt.html))
+			require.NoError(t, err)
+			got := extractEmailsFromDoc(doc)
+			require.Equal(t, tt.expect, got)
+		})
+	}
+}
+
+func TestExtractEmailsFromHTML(t *testing.T) {
+	tests := []struct {
+		name   string
+		body   []byte
+		expect []string
+	}{
+		{
+			name:   "finds email patterns in raw HTML",
+			body:   []byte(`<html><body><a href="mailto:info@shop.com">info@shop.com</a><p>Also reach hello@shop.com</p></body></html>`),
+			expect: []string{"info@shop.com", "hello@shop.com"},
+		},
+		{
+			name:   "excludes invalid emails",
+			body:   []byte(`<p>noreply@company.com and user@example.com and valid@company.com</p>`),
+			expect: []string{"valid@company.com"},
+		},
+		{
+			name:   "returns nil for HTML with no emails",
+			body:   []byte(`<html><body><p>No emails here at all.</p></body></html>`),
+			expect: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractEmailsFromHTML(tt.body)
+			require.Equal(t, tt.expect, got)
+		})
+	}
+}
+
+func TestExtractEmailsFromText(t *testing.T) {
+	tests := []struct {
+		name   string
+		text   []byte
+		expect []string
+	}{
+		{
+			name:   "finds email patterns in plain text",
+			text:   []byte("Contact us at info@store.com or sales@store.com for inquiries."),
+			expect: []string{"info@store.com", "sales@store.com"},
+		},
+		{
+			name:   "excludes invalid emails",
+			text:   []byte("noreply@store.com and user@sentry.io but also hello@store.com"),
+			expect: []string{"hello@store.com"},
+		},
+		{
+			name:   "returns nil for text with no emails",
+			text:   []byte("This is some plain text with no email addresses."),
+			expect: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractEmailsFromText(tt.text)
 			require.Equal(t, tt.expect, got)
 		})
 	}
