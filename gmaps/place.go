@@ -3,13 +3,11 @@ package gmaps
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/gosom/scrapemate"
-	"github.com/playwright-community/playwright-go"
 
 	"github.com/gosom/google-maps-scraper/exiter"
 )
@@ -83,9 +81,17 @@ func (j *PlaceJob) Process(_ context.Context, resp *scrapemate.Response) (any, [
 		entry.Link = j.GetURL()
 	}
 
-	allReviewsRaw, ok := resp.Meta["reviews_raw"].(fetchReviewsResponse)
+	// Handle RPC-based reviews
+	allReviewsRaw, ok := resp.Meta["reviews_raw"].(FetchReviewsResponse)
 	if ok && len(allReviewsRaw.pages) > 0 {
 		entry.AddExtraReviews(allReviewsRaw.pages)
+	}
+
+	// Handle DOM-based reviews (fallback)
+	domReviews, ok := resp.Meta["dom_reviews"].([]DOMReview)
+	if ok && len(domReviews) > 0 {
+		convertedReviews := ConvertDOMReviewsToReviews(domReviews)
+		entry.UserReviewsExtended = append(entry.UserReviewsExtended, convertedReviews...)
 	}
 
 	if j.ExtractEmail && entry.IsWebsiteValidForEmail() {
@@ -106,43 +112,30 @@ func (j *PlaceJob) Process(_ context.Context, resp *scrapemate.Response) (any, [
 	return &entry, nil, err
 }
 
-func (j *PlaceJob) BrowserActions(ctx context.Context, page playwright.Page) scrapemate.Response {
+func (j *PlaceJob) BrowserActions(ctx context.Context, page scrapemate.BrowserPage) scrapemate.Response {
 	var resp scrapemate.Response
 
-	pageResponse, err := page.Goto(j.GetURL(), playwright.PageGotoOptions{
-		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
-	})
+	pageResponse, err := page.Goto(j.GetURL(), scrapemate.WaitUntilDOMContentLoaded)
 	if err != nil {
 		resp.Error = err
 
 		return resp
 	}
 
-	if err = clickRejectCookiesIfRequired(page); err != nil {
-		resp.Error = err
+	clickRejectCookiesIfRequired(page)
 
-		return resp
-	}
+	const defaultTimeout = 5 * time.Second
 
-	const defaultTimeout = 5000
-
-	err = page.WaitForURL(page.URL(), playwright.PageWaitForURLOptions{
-		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
-		Timeout:   playwright.Float(defaultTimeout),
-	})
+	err = page.WaitForURL(page.URL(), defaultTimeout)
 	if err != nil {
 		resp.Error = err
 
 		return resp
 	}
 
-	resp.URL = pageResponse.URL()
-	resp.StatusCode = pageResponse.Status()
-	resp.Headers = make(http.Header, len(pageResponse.Headers()))
-
-	for k, v := range pageResponse.Headers() {
-		resp.Headers.Add(k, v)
-	}
+	resp.URL = pageResponse.URL
+	resp.StatusCode = pageResponse.StatusCode
+	resp.Headers = pageResponse.Headers
 
 	raw, err := j.extractJSON(page)
 	if err != nil {
@@ -166,36 +159,99 @@ func (j *PlaceJob) BrowserActions(ctx context.Context, page playwright.Page) scr
 				reviewCount: reviewCount,
 			}
 
-			reviewFetcher := newReviewFetcher(params)
+			// Use the new fallback mechanism that tries RPC first, then DOM
+			rpcData, domReviews, err := FetchReviewsWithFallback(ctx, params)
 
-			reviewData, err := reviewFetcher.fetch(ctx)
-			if err != nil {
-				return resp
+			switch {
+			case err != nil:
+				fmt.Printf("Warning: review extraction failed: %v\n", err)
+			case len(rpcData.pages) > 0:
+				resp.Meta["reviews_raw"] = rpcData
+			case len(domReviews) > 0:
+				resp.Meta["dom_reviews"] = domReviews
 			}
-
-			resp.Meta["reviews_raw"] = reviewData
 		}
 	}
 
 	return resp
 }
 
-func (j *PlaceJob) extractJSON(page playwright.Page) ([]byte, error) {
-	rawI, err := page.Evaluate(js)
-	if err != nil {
-		return nil, err
+func (j *PlaceJob) getRaw(ctx context.Context, page scrapemate.BrowserPage) (any, error) {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("timeout while getting raw data: %w", ctx.Err())
+		default:
+			raw, err := page.Eval(js)
+			if err != nil {
+				// Continue retrying on error
+				<-time.After(time.Millisecond * 200)
+				continue
+			}
+
+			// Check for valid non-null result
+			// go-rod may return nil for JS null, or empty string
+			if raw == nil {
+				<-time.After(time.Millisecond * 200)
+				continue
+			}
+
+			// If it's a string, make sure it's not empty
+			if str, ok := raw.(string); ok {
+				if str == "" {
+					<-time.After(time.Millisecond * 200)
+					continue
+				}
+			}
+
+			return raw, nil
+		}
+	}
+}
+
+func (j *PlaceJob) extractJSON(page scrapemate.BrowserPage) ([]byte, error) {
+	const maxRetries = 2
+
+	for attempt := range maxRetries {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		rawI, err := j.getRaw(ctx, page)
+
+		cancel()
+
+		if err != nil {
+			// On timeout, try reloading the page
+			if attempt < maxRetries-1 {
+				if reloadErr := page.Reload(scrapemate.WaitUntilDOMContentLoaded); reloadErr == nil {
+					continue
+				}
+			}
+
+			return nil, err
+		}
+
+		if rawI == nil {
+			if attempt < maxRetries-1 {
+				if reloadErr := page.Reload(scrapemate.WaitUntilDOMContentLoaded); reloadErr == nil {
+					continue
+				}
+			}
+
+			return nil, fmt.Errorf("APP_INITIALIZATION_STATE data not found")
+		}
+
+		raw, ok := rawI.(string)
+		if !ok {
+			return nil, fmt.Errorf("could not convert to string, got type %T", rawI)
+		}
+
+		const prefix = `)]}'`
+
+		raw = strings.TrimSpace(strings.TrimPrefix(raw, prefix))
+
+		return []byte(raw), nil
 	}
 
-	raw, ok := rawI.(string)
-	if !ok {
-		return nil, fmt.Errorf("could not convert to string")
-	}
-
-	const prefix = `)]}'`
-
-	raw = strings.TrimSpace(strings.TrimPrefix(raw, prefix))
-
-	return []byte(raw), nil
+	return nil, fmt.Errorf("APP_INITIALIZATION_STATE data not found after retries")
 }
 
 func (j *PlaceJob) getReviewCount(data []byte) int {
@@ -211,24 +267,26 @@ func (j *PlaceJob) UseInResults() bool {
 	return j.UsageInResultststs
 }
 
-func ctxWait(ctx context.Context, dur time.Duration) {
-	select {
-	case <-ctx.Done():
-	case <-time.After(dur):
-	}
-}
-
 const js = `
-function parse() {
-	const appState = window.APP_INITIALIZATION_STATE[3];
-	if (!appState) {
+(function() {
+	if (!window.APP_INITIALIZATION_STATE || !window.APP_INITIALIZATION_STATE[3]) {
 		return null;
 	}
-	const keys = Object.keys(appState);
-	const key = keys[0];
-	if (appState[key] && appState[key][6]) {
-		return appState[key][6];
+	const appState = window.APP_INITIALIZATION_STATE[3];
+	
+	// Search all properties of appState for arrays containing JSON strings
+	for (const key of Object.keys(appState)) {
+		const arr = appState[key];
+		if (Array.isArray(arr)) {
+			// Check indices 6 and 5 (where place data typically is)
+			for (const idx of [6, 5]) {
+				const item = arr[idx];
+				if (typeof item === 'string' && item.startsWith(")]}'")) {
+					return item;
+				}
+			}
+		}
 	}
 	return null;
-}
+})()
 `

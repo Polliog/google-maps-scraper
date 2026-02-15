@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"iter"
 	"math"
+	"net/url"
 	"runtime/debug"
 	"slices"
 	"strconv"
@@ -83,6 +84,7 @@ type Entry struct {
 	Timezone            string                 `json:"timezone"`
 	PriceRange          string                 `json:"price_range"`
 	DataID              string                 `json:"data_id"`
+	PlaceID             string                 `json:"place_id"`
 	Images              []Image                `json:"images"`
 	Reservations        []LinkSource           `json:"reservations"`
 	OrderOnline         []LinkSource           `json:"order_online"`
@@ -179,6 +181,7 @@ func (e *Entry) CsvHeaders() []string {
 		"timezone",
 		"price_range",
 		"data_id",
+		"place_id",
 		"images",
 		"reservations",
 		"order_online",
@@ -217,6 +220,7 @@ func (e *Entry) CsvRow() []string {
 		e.Timezone,
 		e.PriceRange,
 		e.DataID,
+		e.PlaceID,
 		stringify(e.Images),
 		stringify(e.Reservations),
 		stringify(e.OrderOnline),
@@ -244,17 +248,29 @@ func (e *Entry) AddExtraReviews(pages [][]byte) {
 }
 
 func extractReviews(data []byte) []Review {
-	if len(data) >= 4 && string(data[0:4]) == `)]}'` {
-		data = data[4:] // Skip security prefix
+	// Skip the security prefix
+	prefix := ")]}'\n"
+	if len(data) >= len(prefix) && string(data[:len(prefix)]) == prefix {
+		data = data[len(prefix):]
+	} else if len(data) >= 4 && string(data[0:4]) == `)]}'` {
+		data = data[4:]
 	}
 
 	var jd []any
 	if err := json.Unmarshal(data, &jd); err != nil {
-		fmt.Printf("Error unmarshalling JSON: %v\n", err)
+		fmt.Printf("Error unmarshalling RPC JSON: %v (data len: %d)\n", err, len(data))
+		return nil
+	}
+
+	if len(jd) < 3 {
 		return nil
 	}
 
 	reviewsI := getNthElementAndCast[[]any](jd, 2)
+	if len(reviewsI) == 0 {
+		// Try alternative indices - Google may have changed the structure
+		reviewsI = getNthElementAndCast[[]any](jd, 0)
+	}
 
 	return parseReviews(reviewsI)
 }
@@ -314,7 +330,7 @@ func EntryFromJSON(raw []byte, reviewCountOnly ...bool) (entry Entry, err error)
 	)
 	entry.OpenHours = getHours(darray)
 	entry.PopularTimes = getPopularTimes(darray)
-	entry.WebSite = getNthElementAndCast[string](darray, 7, 0)
+	entry.WebSite = extractActualURL(getNthElementAndCast[string](darray, 7, 0))
 	entry.Phone = getNthElementAndCast[string](darray, 178, 0, 0)
 	entry.PlusCode = getNthElementAndCast[string](darray, 183, 2, 2, 0)
 	entry.ReviewRating = getNthElementAndCast[float64](darray, 4, 7)
@@ -328,6 +344,7 @@ func EntryFromJSON(raw []byte, reviewCountOnly ...bool) (entry Entry, err error)
 	entry.Timezone = getNthElementAndCast[string](darray, 30)
 	entry.PriceRange = getNthElementAndCast[string](darray, 4, 2)
 	entry.DataID = getNthElementAndCast[string](darray, 10)
+	entry.PlaceID = getNthElementAndCast[string](darray, 78)
 
 	items := getLinkSource(getLinkSourceParams{
 		arr:    getNthElementAndCast[[]any](darray, 171, 0),
@@ -418,8 +435,19 @@ func EntryFromJSON(raw []byte, reviewCountOnly ...bool) (entry Entry, err error)
 		5: int(getNthElementAndCast[float64](darray, 175, 3, 4)),
 	}
 
+	// Parse inline reviews from the page data
 	reviewsI := getNthElementAndCast[[]any](darray, 175, 9, 0, 0)
-	entry.UserReviews = make([]Review, 0, len(reviewsI))
+	if len(reviewsI) > 0 {
+		entry.UserReviews = parseReviews(reviewsI)
+	} else {
+		// Try alternative location for reviews
+		reviewsI = getNthElementAndCast[[]any](darray, 175, 9, 0)
+		if len(reviewsI) > 0 {
+			entry.UserReviews = parseReviews(reviewsI)
+		} else {
+			entry.UserReviews = make([]Review, 0)
+		}
+	}
 
 	return entry, nil
 }
@@ -429,16 +457,58 @@ func parseReviews(reviewsI []any) []Review {
 
 	for i := range reviewsI {
 		el := getNthElementAndCast[[]any](reviewsI, i, 0)
+		if len(el) == 0 {
+			// Try alternative structure
+			el = getNthElementAndCast[[]any](reviewsI, i)
+			if len(el) == 0 {
+				continue
+			}
+		}
 
+		// Try multiple paths for the timestamp
 		time := getNthElementAndCast[[]any](el, 2, 2, 0, 1, 21, 6, 8)
+		if len(time) == 0 {
+			time = getNthElementAndCast[[]any](el, 2, 2, 0, 1, 6, 8)
+		}
 
+		// Try multiple paths for profile picture
 		profilePic, err := decodeURL(getNthElementAndCast[string](el, 1, 4, 5, 1))
-		if err != nil {
-			profilePic = ""
+		if err != nil || profilePic == "" {
+			profilePic = getNthElementAndCast[string](el, 1, 2, 0)
+			if profilePic == "" {
+				profilePic = getNthElementAndCast[string](el, 0, 2, 0)
+			}
+		}
+
+		// Try multiple paths for author name
+		authorName := getNthElementAndCast[string](el, 1, 4, 5, 0)
+		if authorName == "" {
+			authorName = getNthElementAndCast[string](el, 1, 4, 4)
+			if authorName == "" {
+				authorName = getNthElementAndCast[string](el, 0, 1)
+			}
+		}
+
+		// Try multiple paths for rating
+		rating := int(getNthElementAndCast[float64](el, 2, 0, 0))
+		if rating == 0 {
+			rating = int(getNthElementAndCast[float64](el, 2, 0))
+			if rating == 0 {
+				rating = int(getNthElementAndCast[float64](el, 1, 0, 0))
+			}
+		}
+
+		// Try multiple paths for description
+		description := getNthElementAndCast[string](el, 2, 15, 0, 0)
+		if description == "" {
+			description = getNthElementAndCast[string](el, 2, 15, 0)
+			if description == "" {
+				description = getNthElementAndCast[string](el, 3, 0)
+			}
 		}
 
 		review := Review{
-			Name:           getNthElementAndCast[string](el, 1, 4, 5, 0),
+			Name:           authorName,
 			ProfilePicture: profilePic,
 			When: func() string {
 				if len(time) < 3 {
@@ -447,19 +517,23 @@ func parseReviews(reviewsI []any) []Review {
 
 				return fmt.Sprintf("%v-%v-%v", time[0], time[1], time[2])
 			}(),
-			Rating:      int(getNthElementAndCast[float64](el, 2, 0, 0)),
-			Description: getNthElementAndCast[string](el, 2, 15, 0, 0),
+			Rating:      rating,
+			Description: description,
 		}
 
 		if review.Name == "" {
 			continue
 		}
 
+		// Try multiple paths for images
 		optsI := getNthElementAndCast[[]any](el, 2, 2, 0, 1, 21, 7)
+		if len(optsI) == 0 {
+			optsI = getNthElementAndCast[[]any](el, 2, 2, 0, 1, 7)
+		}
 
 		for j := range optsI {
 			val := getNthElementAndCast[string](optsI, j)
-			if val != "" {
+			if val != "" && len(val) > 2 {
 				review.Images = append(review.Images, val[2:])
 			}
 		}
@@ -496,21 +570,64 @@ func getLinkSource(params getLinkSourceParams) []LinkSource {
 
 //nolint:gomnd // it's ok, I need the indexes
 func getHours(darray []any) map[string][]string {
-	items := getNthElementAndCast[[]any](darray, 34, 1)
+	// Try new structure first (as of Nov 2025) - darray[203][0]
+	items := getNthElementAndCast[[]any](darray, 203, 0)
+	if len(items) == 0 {
+		// Fall back to old structure - darray[34][1]
+		items = getNthElementAndCast[[]any](darray, 34, 1)
+	}
+
 	hours := make(map[string][]string, len(items))
 
 	for _, item := range items {
-		//nolint:errcheck // it's ok, I'm "sure" the indexes are correct
-		day := getNthElementAndCast[string](item.([]any), 0)
-		//nolint:errcheck // it's ok, I'm "sure" the indexes are correct
-		timesI := getNthElementAndCast[[]any](item.([]any), 1)
-		times := make([]string, len(timesI))
-
-		for i := range timesI {
-			times[i], _ = timesI[i].(string)
+		itemArray, ok := item.([]any)
+		if !ok {
+			continue
 		}
 
-		hours[day] = times
+		// New structure: [0] = day name, [3] = time slots array
+		day := getNthElementAndCast[string](itemArray, 0)
+		if day == "" {
+			continue
+		}
+
+		// Try new structure for times
+		timeSlotsI := getNthElementAndCast[[]any](itemArray, 3)
+		if len(timeSlotsI) > 0 {
+			// New format: each slot is [formatted_string, [[hour, min], [hour, min]]]
+			times := make([]string, 0, len(timeSlotsI))
+
+			for _, slot := range timeSlotsI {
+				slotArray, ok := slot.([]any)
+				if !ok || len(slotArray) == 0 {
+					continue
+				}
+
+				// Get the formatted time string (e.g., "11 am–1:30 pm")
+				timeStr := getNthElementAndCast[string](slotArray, 0)
+				if timeStr != "" {
+					times = append(times, timeStr)
+				}
+			}
+
+			if len(times) > 0 {
+				hours[day] = times
+			}
+		} else {
+			// Fall back to old structure: [1] = times array
+			timesI := getNthElementAndCast[[]any](itemArray, 1)
+			times := make([]string, 0, len(timesI))
+
+			for i := range timesI {
+				if timeStr, ok := timesI[i].(string); ok {
+					times = append(times, timeStr)
+				}
+			}
+
+			if len(times) > 0 {
+				hours[day] = times
+			}
+		}
 	}
 
 	return hours
@@ -602,6 +719,10 @@ func getNthElementAndCast[T any](arr []any, indexes ...int) T {
 		return defaultVal
 	}
 
+	if indexes[0] >= len(arr) {
+		return defaultVal
+	}
+
 	ans, ok := arr[indexes[0]].(T)
 	if !ok {
 		return defaultVal
@@ -637,6 +758,24 @@ func decodeURL(url string) (string, error) {
 	}
 
 	return unquoted, nil
+}
+
+func extractActualURL(googleURL string) string {
+	if googleURL == "" || !strings.HasPrefix(googleURL, "/url?q=") {
+		return googleURL
+	}
+
+	parsedURL, err := url.Parse(googleURL)
+	if err != nil {
+		return googleURL
+	}
+
+	actualURL := parsedURL.Query().Get("q")
+	if actualURL == "" {
+		return googleURL
+	}
+
+	return actualURL
 }
 
 type EntryWithDistance struct {

@@ -141,7 +141,8 @@ func (r *fileRunner) setInput() error {
 }
 
 func (r *fileRunner) setWriters() error {
-	if r.cfg.CustomWriter != "" {
+	switch {
+	case r.cfg.CustomWriter != "":
 		parts := strings.Split(r.cfg.CustomWriter, ":")
 		if len(parts) != 2 {
 			return fmt.Errorf("invalid custom writer format: %s", r.cfg.CustomWriter)
@@ -155,7 +156,7 @@ func (r *fileRunner) setWriters() error {
 		}
 
 		r.writers = append(r.writers, customWriter)
-	} else {
+	default:
 		var resultsWriter io.Writer
 
 		switch r.cfg.ResultsFile {
@@ -202,8 +203,7 @@ func (r *fileRunner) setApp() error {
 			opts = append(opts, scrapemateapp.WithJS(
 				scrapemateapp.Headfull(),
 				scrapemateapp.DisableImages(),
-			),
-			)
+			))
 		} else {
 			opts = append(opts, scrapemateapp.WithJS(scrapemateapp.DisableImages()))
 		}
