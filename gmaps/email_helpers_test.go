@@ -188,6 +188,40 @@ func TestExtractEmailsFromHTML(t *testing.T) {
 	}
 }
 
+func TestEntryCsvHeadersContainEmailFields(t *testing.T) {
+	e := &Entry{}
+	headers := e.CsvHeaders()
+	require.Contains(t, headers, "email_status")
+	require.Contains(t, headers, "email_source")
+}
+
+func TestEntryCsvRowContainsEmailFields(t *testing.T) {
+	e := &Entry{
+		EmailStatus: "found",
+		EmailSource: "homepage",
+		Emails:      []string{"test@example-biz.com"},
+	}
+	row := e.CsvRow()
+	headers := e.CsvHeaders()
+	require.Equal(t, len(headers), len(row))
+
+	statusIdx := -1
+	sourceIdx := -1
+	for i, h := range headers {
+		if h == "email_status" {
+			statusIdx = i
+		}
+		if h == "email_source" {
+			sourceIdx = i
+		}
+	}
+
+	require.NotEqual(t, -1, statusIdx)
+	require.NotEqual(t, -1, sourceIdx)
+	require.Equal(t, "found", row[statusIdx])
+	require.Equal(t, "homepage", row[sourceIdx])
+}
+
 func TestExtractEmailsFromText(t *testing.T) {
 	tests := []struct {
 		name   string
