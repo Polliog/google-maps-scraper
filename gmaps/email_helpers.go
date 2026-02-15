@@ -121,7 +121,7 @@ func extractEmailsFromDoc(doc *goquery.Document) []string {
 
 	// Strategy 2: scan visible text after removing script/style elements.
 	docCopy := doc.Clone()
-	docCopy.Find("script, style").Remove()
+	docCopy.Find("script, style, noscript").Remove()
 	text := docCopy.Text()
 
 	found := emailaddress.Find([]byte(text), false)
