@@ -6,12 +6,14 @@
     <td>
         <span class="status-indicator status-{{.Status}}">{{.Status}}</span>
     </td>
-    <td>
+    <td class="actions-cell">
         {{ if eq .Status "ok" }}
+        <button hx-get="/preview?id={{.ID}}&page=1" hx-target="#preview-area" hx-swap="innerHTML" class="button preview-button">Preview</button>
         <a href="/view/json?id={{.ID}}" target="_blank" class="button view-button">View JSON</a>
         <a href="/download/json?id={{.ID}}" download class="button download-button">Download JSON</a>
         <a href="/download/csv?id={{.ID}}" download class="button download-button">Download CSV</a>
         {{ end }}
+        <a href="/?clone={{.ID}}" class="button clone-button">Clone</a>
         <button hx-delete="/delete?id={{.ID}}"
                 hx-target="closest tr"
                 hx-swap="outerHTML"

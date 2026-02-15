@@ -12,6 +12,7 @@
         <header>
             <h1>Google Maps Scraper</h1>
             <nav>
+                <a href="/settings">Settings</a>
                 <a href="/api/docs" target="_blank" rel="noopener noreferrer">API Documentation</a>
             </nav>
             <small>Fork By Polliog</small>
@@ -19,91 +20,115 @@
         <main>
             <div class="sidebar">
                 <div id="error-container" class="error-message"></div>
-                <form 
-                    hx-post="/scrape" 
-                    hx-target="#job-table tbody" 
+                <form
+                    hx-post="/scrape"
+                    hx-target="#job-table tbody"
                     hx-swap="beforeend"
                     hx-indicator="#spinner"
                     hx-on::before-request="document.getElementById('error-container').innerHTML = ''"
                     hx-on::after-request="if(!event.detail.successful) document.getElementById('error-container').innerHTML = event.detail.xhr.responseText"
                 >
-                    
                     <fieldset>
-                        <legend>Job Details</legend>
                         <div class="form-group">
-                            <label for="name">Job Name:</label>
-                            <input type="text" id="name" name="name" value="{{.Name}}">
+                            <label for="keywords">What are you looking for?</label>
+                            <textarea id="keywords" name="keywords" rows="6" required placeholder="One search query per line&#10;e.g. restaurants Milan&#10;hotels Rome&#10;cafes Florence">{{ .KeywordsString }}</textarea>
+                            <div class="keywords-actions">
+                                <label class="file-import-label" for="file-import">Import from .txt file</label>
+                                <input type="file" id="file-import" accept=".txt,.csv" class="file-import-input">
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label for="keywords">Keywords:</label>
-                            <textarea id="keywords" name="keywords" rows="10">{{ .KeywordsString }}</textarea>
+
+                        <div class="form-group checkbox">
+                            <input type="checkbox" id="split-keywords" name="split-keywords">
+                            <label for="split-keywords">One job per keyword</label>
+                            <span class="form-hint">Creates separate jobs for each line, so they run independently.</span>
                         </div>
-                        <div class="form-group">
-                            <label for="lang">Language:</label>
-                            <input type="text" id="lang" name="lang" value="{{.Language}}">
+
+                        <button type="submit" class="primary-button">Start Scraping</button>
+
+                        <div class="settings-info">
+                            Defaults: <strong>{{.Language}}</strong> language, depth <strong>{{.Depth}}</strong>, <strong>{{.MaxTime}}</strong> max{{if .Email}}, emails on{{end}}.
+                            <a href="/settings">Change defaults</a>
                         </div>
                     </fieldset>
-                    
-                    <details class="expandable-section">
-                        <summary>Location Settings</summary>
+
+                    <details class="expandable-section override-section">
+                        <summary>Override Options for This Job</summary>
+
                         <fieldset>
                             <div class="form-group">
-                                <label for="zoom">Zoom:</label>
-                                <input type="number" id="zoom" name="zoom" value="{{.Zoom}}">
+                                <label for="name">Job Name:</label>
+                                <input type="text" id="name" name="name" value="{{.Name}}" placeholder="Auto-generated from first keyword">
+                                <span class="form-hint">Optional. Leave empty to use the first keyword.</span>
                             </div>
                             <div class="form-group">
-                                <label for="latitude">Latitude:</label>
-                                <input type="number" step="0.000000000000001" id="latitude" name="latitude" value="{{.Lat}}">
-                            </div>
-                            <div class="form-group">
-                                <label for="longitude">Longitude:</label>
-                                <input type="number" step="0.000000000000001" id="longitude" name="longitude" value="{{.Lon}}">
-                            </div>
-                        </fieldset>
-                    </details>
-                    
-                    <details class="expandable-section">
-                        <summary>Advanced Options</summary>
-                        <fieldset>
-                            <div class="form-group">
-                                <label for="fastmode">Fast Mode (BETA):</label>
-                                <input type="checkbox" id="fastmode" name="fastmode" {{if .FastMode}}checked{{end}}>
-                            </div>
-                            <div class="form-group">
-                                    <label for="radius">Radius (BETA):</label>
-                                    <input type="number" id="radius" name="radius" value="{{.Radius}}">
+                                <label for="lang">Language:</label>
+                                <input type="text" id="lang" name="lang" value="{{.Language}}" required minlength="2" maxlength="2" pattern="[a-zA-Z]{2}">
+                                <span class="form-hint">ISO 639-1 code (2 letters). Examples: en, it, de, es, fr, pt.</span>
                             </div>
                             <div class="form-group">
                                 <label for="depth">Depth:</label>
-                                <input type="number" step="1" id="depth" name="depth" value="{{.Depth}}">
+                                <input type="number" step="1" id="depth" name="depth" value="{{.Depth}}" required min="1">
+                                <span class="form-hint">Scroll iterations on the results page. Each loads ~20 results.</span>
                             </div>
                             <div class="form-group checkbox">
                                 <input type="checkbox" id="email" name="email" {{if .Email}}checked{{end}}>
                                 <label for="email">Fetch Emails</label>
+                                <span class="form-hint">Visit websites to extract emails. Increases scraping time.</span>
                             </div>
                             <div class="form-group">
-                                <label for="maxtime">Max job time:</label>
-                                <input type="text" id="maxtime" name="maxtime" value="{{.MaxTime}}">
+                                <label for="maxtime">Max Job Time:</label>
+                                <input type="text" id="maxtime" name="maxtime" value="{{.MaxTime}}" required placeholder="e.g. 10m, 1h30m, 2h">
+                                <span class="form-hint">Go duration format: "10m", "1h30m", "2h". Minimum: 1m.</span>
                             </div>
                         </fieldset>
-                    </details>
-                    <details class="expandable-section">
-                        <summary>Proxies</summary>
-                        <fieldset>
-                            <div class="form-group">
-                                <label for="proxies">Proxies:(one per line)</label>
-                                <p class="text-muted"><small>Examples:<br>
-                                        <p>HTTPS proxy with username/password: https://username:password@myproxy.local:443<p>
-                                        <p>HTTP proxy with username/password: http://username:password@myproxy.local:443<p>
-                                        <p>SOCKS5 proxy without auth: socks5://127.0.0.1:8000</p>
-                                </p>
 
-                                <textarea id="proxies" name="proxies" rows="5">{{.ProxiesString}}</textarea>
-                            </div>
-                        </fieldset>
+                        <details class="expandable-section">
+                            <summary>Location Settings</summary>
+                            <fieldset>
+                                <div class="form-group">
+                                    <label for="zoom">Zoom:</label>
+                                    <input type="number" id="zoom" name="zoom" value="{{.Zoom}}" required min="1" max="21">
+                                    <span class="form-hint">Map zoom level (1-21). Default: 15 (neighborhood).</span>
+                                </div>
+                                <div class="form-group">
+                                    <label for="latitude">Latitude:</label>
+                                    <input type="number" step="0.000000000000001" id="latitude" name="latitude" value="{{.Lat}}" min="-90" max="90">
+                                    <span class="form-hint">GPS latitude (-90 to 90). <strong class="fastmode-required">Required for Fast Mode.</strong></span>
+                                </div>
+                                <div class="form-group">
+                                    <label for="longitude">Longitude:</label>
+                                    <input type="number" step="0.000000000000001" id="longitude" name="longitude" value="{{.Lon}}" min="-180" max="180">
+                                    <span class="form-hint">GPS longitude (-180 to 180). <strong class="fastmode-required">Required for Fast Mode.</strong></span>
+                                </div>
+                                <div class="form-group">
+                                    <label for="radius">Radius (meters):</label>
+                                    <input type="number" id="radius" name="radius" value="{{.Radius}}" min="1">
+                                    <span class="form-hint">Search radius around the coordinates. Default: 10000 (10 km).</span>
+                                </div>
+                                <div class="form-group checkbox">
+                                    <input type="checkbox" id="fastmode" name="fastmode" {{if .FastMode}}checked{{end}}>
+                                    <label for="fastmode">Fast Mode (BETA)</label>
+                                    <span class="form-hint">API-based search. Requires coordinates.</span>
+                                </div>
+                            </fieldset>
+                        </details>
+
+                        <details class="expandable-section">
+                            <summary>Proxies</summary>
+                            <fieldset>
+                                <div class="form-group">
+                                    <label for="proxies">Proxies (one per line):</label>
+                                    <span class="form-hint">Supports HTTPS, HTTP and SOCKS5.</span>
+                                    <div class="proxy-examples">
+                                        <code>https://user:pass@proxy.example:443</code>
+                                        <code>socks5://127.0.0.1:8000</code>
+                                    </div>
+                                    <textarea id="proxies" name="proxies" rows="4" placeholder="Leave empty to use defaults">{{.ProxiesString}}</textarea>
+                                </div>
+                            </fieldset>
+                        </details>
                     </details>
-                    
-                    <button type="submit">Start Scraping</button>
                 </form>
             </div>
             <div class="content">
@@ -119,20 +144,126 @@
                         </tr>
                     </thead>
                     <tbody hx-get="/jobs" hx-trigger="load, every 10s">
-                        <!-- Job rows will be inserted here by HTMX -->
                     </tbody>
                 </table>
+                <div id="preview-area"></div>
             </div>
         </main>
     </div>
 
 <script>
-function hideSponsor() {
-    const sponsorSection = document.getElementById('sponsor-section');
-    if (sponsorSection) {
-        sponsorSection.style.display = 'none';
+(function() {
+    // File import
+    var fileInput = document.getElementById('file-import');
+    var keywords = document.getElementById('keywords');
+
+    fileInput.addEventListener('change', function(e) {
+        var file = e.target.files[0];
+        if (!file) return;
+        var reader = new FileReader();
+        reader.onload = function(ev) {
+            var text = ev.target.result.trim();
+            if (keywords.value.trim()) {
+                keywords.value = keywords.value.trim() + '\n' + text;
+            } else {
+                keywords.value = text;
+            }
+        };
+        reader.readAsText(file);
+        fileInput.value = '';
+    });
+
+    // Drag & drop on keywords textarea
+    keywords.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        keywords.classList.add('drag-over');
+    });
+
+    keywords.addEventListener('dragleave', function() {
+        keywords.classList.remove('drag-over');
+    });
+
+    keywords.addEventListener('drop', function(e) {
+        e.preventDefault();
+        keywords.classList.remove('drag-over');
+        var file = e.dataTransfer.files[0];
+        if (!file) return;
+        var reader = new FileReader();
+        reader.onload = function(ev) {
+            var text = ev.target.result.trim();
+            if (keywords.value.trim()) {
+                keywords.value = keywords.value.trim() + '\n' + text;
+            } else {
+                keywords.value = text;
+            }
+        };
+        reader.readAsText(file);
+    });
+
+    // Fast mode constraints
+    var fastmode = document.getElementById('fastmode');
+    var lat = document.getElementById('latitude');
+    var lon = document.getElementById('longitude');
+    var highlights = document.querySelectorAll('.fastmode-required');
+
+    function updateFastModeConstraints() {
+        var on = fastmode.checked;
+        lat.required = on;
+        lon.required = on;
+        highlights.forEach(function(el) {
+            el.classList.toggle('active', on);
+        });
+        if (on && lat.value === '0' && lon.value === '0') {
+            lat.value = '';
+            lon.value = '';
+            lat.focus();
+        }
     }
-}
+
+    fastmode.addEventListener('change', updateFastModeConstraints);
+    updateFastModeConstraints();
+
+    // Form validation
+    document.querySelector('form').addEventListener('submit', function(e) {
+        var errors = [];
+        var kw = document.getElementById('keywords').value.trim();
+        if (!kw) {
+            errors.push('At least one keyword is required.');
+        }
+        var lang = document.getElementById('lang').value.trim();
+        if (lang.length !== 2) {
+            errors.push('Language must be a 2-letter ISO code (e.g. en, it, de).');
+        }
+        var zoom = parseInt(document.getElementById('zoom').value, 10);
+        if (isNaN(zoom) || zoom < 1 || zoom > 21) {
+            errors.push('Zoom must be between 1 and 21.');
+        }
+        var depth = parseInt(document.getElementById('depth').value, 10);
+        if (isNaN(depth) || depth < 1) {
+            errors.push('Depth must be at least 1.');
+        }
+        var maxtime = document.getElementById('maxtime').value.trim();
+        if (!maxtime) {
+            errors.push('Max job time is required (e.g. 10m, 1h).');
+        } else if (!/^\d+[hms](\d+[hms])*$/.test(maxtime)) {
+            errors.push('Max job time must be a Go duration (e.g. 10m, 1h30m, 2h).');
+        }
+        if (fastmode.checked) {
+            var latVal = parseFloat(lat.value);
+            var lonVal = parseFloat(lon.value);
+            if (isNaN(latVal) || latVal < -90 || latVal > 90) {
+                errors.push('Fast Mode requires a valid Latitude (-90 to 90).');
+            }
+            if (isNaN(lonVal) || lonVal < -180 || lonVal > 180) {
+                errors.push('Fast Mode requires a valid Longitude (-180 to 180).');
+            }
+        }
+        if (errors.length > 0) {
+            e.preventDefault();
+            document.getElementById('error-container').innerHTML = errors.join('<br>');
+        }
+    });
+})();
 </script>
 </body>
 </html>

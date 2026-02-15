@@ -1,4 +1,4 @@
-services:
+pe services:
   db:
     image: postgres:15.2-alpine
     environment:
@@ -26,6 +26,19 @@ services:
     depends_on:
       db:
         condition: service_healthy
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["-web", "-dsn", "postgres://postgres:postgres@db:5432/postgres?sslmode=disable", "-addr", ":8080"]
+    ports:
+      - '127.0.0.1:8080:8080'
+    restart: "unless-stopped"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   gmapsdev:

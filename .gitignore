@@ -2,3 +2,5 @@ cache/
 vendor
 bin
 webdata/
+/.env
+.idea

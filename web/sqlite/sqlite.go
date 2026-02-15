@@ -11,6 +11,64 @@ import (
 	"github.com/gosom/google-maps-scraper/web"
 )
 
+func (repo *repo) GetSettings(ctx context.Context) (web.Settings, error) {
+	const q = `SELECT language, depth, email, max_time, proxies FROM settings WHERE id = 1`
+
+	var (
+		language string
+		depth    int
+		email    int
+		maxTime  string
+		proxies  string
+	)
+
+	err := repo.db.QueryRowContext(ctx, q).Scan(&language, &depth, &email, &maxTime, &proxies)
+	if err != nil {
+		return web.Settings{}, err
+	}
+
+	ans := web.Settings{
+		Language: language,
+		Depth:    depth,
+		Email:    email == 1,
+		MaxTime:  maxTime,
+	}
+
+	if err := json.Unmarshal([]byte(proxies), &ans.Proxies); err != nil {
+		ans.Proxies = []string{}
+	}
+
+	return ans, nil
+}
+
+func (repo *repo) UpsertSettings(ctx context.Context, settings *web.Settings) error {
+	proxiesJSON, err := json.Marshal(settings.Proxies)
+	if err != nil {
+		return err
+	}
+
+	emailInt := 0
+	if settings.Email {
+		emailInt = 1
+	}
+
+	const q = `INSERT OR REPLACE INTO settings (id, language, depth, email, max_time, proxies, created_at, updated_at) VALUES (1, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM settings WHERE id = 1), ?), ?)`
+
+	now := time.Now().UTC().Unix()
+
+	_, err = repo.db.ExecContext(ctx, q,
+		settings.Language,
+		settings.Depth,
+		emailInt,
+		settings.MaxTime,
+		string(proxiesJSON),
+		now,
+		now,
+	)
+
+	return err
+}
+
 type repo struct {
 	db *sql.DB
 }
@@ -214,6 +272,32 @@ func createSchema(db *sql.DB) error {
 			updated_at INT NOT NULL
 		)
 	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS settings (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			language TEXT NOT NULL DEFAULT 'en',
+			depth INTEGER NOT NULL DEFAULT 10,
+			email INTEGER NOT NULL DEFAULT 0,
+			max_time TEXT NOT NULL DEFAULT '10m',
+			proxies TEXT NOT NULL DEFAULT '[]',
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC().Unix()
+
+	_, err = db.Exec(
+		`INSERT OR IGNORE INTO settings (id, language, depth, email, max_time, proxies, created_at, updated_at) VALUES (1, 'en', 10, 0, '10m', '[]', ?, ?)`,
+		now, now,
+	)
 
 	return err
 }

@@ -1,0 +1,47 @@
+<div class="preview-container">
+    <div class="preview-header">
+        <span class="preview-count">{{.Total}} results</span>
+        <span class="preview-page">Page {{.Page}} of {{.TotalPages}}</span>
+        <button class="preview-close" onclick="document.getElementById('preview-area').innerHTML=''">Close</button>
+    </div>
+    {{if .Entries}}
+    <table class="preview-table">
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th>Category</th>
+                <th>Address</th>
+                <th>Phone</th>
+                <th>Website</th>
+                <th>Rating</th>
+                <th>Reviews</th>
+                <th>Emails</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{range .Entries}}
+            <tr>
+                <td class="cell-title">{{.Title}}</td>
+                <td>{{.Category}}</td>
+                <td class="cell-address">{{.Address}}</td>
+                <td>{{.Phone}}</td>
+                <td class="cell-website">{{if .WebSite}}<a href="{{.WebSite}}" target="_blank" rel="noopener">link</a>{{end}}</td>
+                <td>{{if .Rating}}{{printf "%.1f" .Rating}}{{end}}</td>
+                <td>{{.ReviewCount}}</td>
+                <td class="cell-emails">{{range $i, $e := .Emails}}{{if $i}}, {{end}}{{$e}}{{end}}</td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+    <div class="preview-pagination">
+        {{if .HasPrev}}
+        <button hx-get="/preview?id={{.JobID}}&page={{.PrevPage}}" hx-target="#preview-area" hx-swap="innerHTML" class="page-btn">Previous</button>
+        {{end}}
+        {{if .HasNext}}
+        <button hx-get="/preview?id={{.JobID}}&page={{.NextPage}}" hx-target="#preview-area" hx-swap="innerHTML" class="page-btn">Next</button>
+        {{end}}
+    </div>
+    {{else}}
+    <p class="preview-empty">No results yet.</p>
+    {{end}}
+</div>

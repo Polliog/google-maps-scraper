@@ -69,6 +69,12 @@ func New(svc *Service, addr string) (*Server, error) {
 		ans.delete(w, r)
 	})
 	mux.HandleFunc("/jobs", ans.getJobs)
+	mux.HandleFunc("/preview", func(w http.ResponseWriter, r *http.Request) {
+		r = requestWithID(r)
+		ans.preview(w, r)
+	})
+	mux.HandleFunc("/settings", ans.settingsPage)
+	mux.HandleFunc("/settings/save", ans.saveSettings)
 	mux.HandleFunc("/", ans.index)
 
 	// api routes
@@ -166,6 +172,9 @@ func New(svc *Service, addr string) (*Server, error) {
 		"static/templates/job_rows.html",
 		"static/templates/job_row.html",
 		"static/templates/redoc.html",
+		"static/templates/settings.html",
+		"static/templates/settings_success.html",
+		"static/templates/preview.html",
 	}
 
 	for _, key := range tmplsKeys {
@@ -267,18 +276,47 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	settings, _ := s.svc.GetSettings(r.Context())
+
 	data := formData{
 		Name:     "",
-		MaxTime:  "10m",
+		MaxTime:  settings.MaxTime,
 		Keywords: []string{},
-		Language: "en",
+		Language: settings.Language,
 		Zoom:     15,
 		FastMode: false,
 		Radius:   10000,
 		Lat:      "0",
 		Lon:      "0",
-		Depth:    10,
-		Email:    false,
+		Depth:    settings.Depth,
+		Email:    settings.Email,
+		Proxies:  settings.Proxies,
+	}
+
+	if cloneID := r.URL.Query().Get("clone"); cloneID != "" {
+		job, err := s.svc.Get(r.Context(), cloneID)
+		if err != nil {
+			log.Printf("clone: job %s not found: %v", cloneID, err)
+		} else {
+			data.Name = job.Name + " (copy)"
+			data.Keywords = job.Data.Keywords
+			data.Language = job.Data.Lang
+			data.Zoom = job.Data.Zoom
+			data.FastMode = job.Data.FastMode
+			data.Radius = job.Data.Radius
+			data.Lat = job.Data.Lat
+			data.Lon = job.Data.Lon
+			data.Depth = job.Data.Depth
+			data.Email = job.Data.Email
+
+			if job.Data.MaxTime > 0 {
+				data.MaxTime = job.Data.MaxTime.String()
+			}
+
+			if len(job.Data.Proxies) > 0 {
+				data.Proxies = job.Data.Proxies
+			}
+		}
 	}
 
 	_ = tmpl.Execute(w, data)
@@ -340,6 +378,14 @@ func (s *Server) scrape(w http.ResponseWriter, r *http.Request) {
 		newJob.Data.Keywords = append(newJob.Data.Keywords, k)
 	}
 
+	if newJob.Name == "" {
+		if len(newJob.Data.Keywords) > 0 {
+			newJob.Name = newJob.Data.Keywords[0]
+		} else {
+			newJob.Name = "Job " + time.Now().Format("2006-01-02 15:04")
+		}
+	}
+
 	newJob.Data.Lang = r.Form.Get("lang")
 
 	newJob.Data.Zoom, err = strconv.Atoi(r.Form.Get("zoom"))
@@ -384,19 +430,7 @@ func (s *Server) scrape(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	err = newJob.Validate()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
-
-		return
-	}
-
-	err = s.svc.Create(r.Context(), &newJob)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-
-		return
-	}
+	splitKeywords := r.Form.Get("split-keywords") == "on"
 
 	tmpl, ok := s.tmpl["static/templates/job_row.html"]
 	if !ok {
@@ -405,7 +439,51 @@ func (s *Server) scrape(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = tmpl.Execute(w, newJob)
+	if splitKeywords && len(newJob.Data.Keywords) > 1 {
+		baseData := newJob.Data
+
+		for _, kw := range baseData.Keywords {
+			j := Job{
+				ID:     uuid.New().String(),
+				Name:   kw,
+				Date:   time.Now().UTC(),
+				Status: StatusPending,
+				Data:   baseData,
+			}
+
+			j.Data.Keywords = []string{kw}
+
+			if err := j.Validate(); err != nil {
+				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+
+				return
+			}
+
+			if err := s.svc.Create(r.Context(), &j); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+
+				return
+			}
+
+			_ = tmpl.Execute(w, j)
+		}
+	} else {
+		err = newJob.Validate()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+
+			return
+		}
+
+		err = s.svc.Create(r.Context(), &newJob)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+
+			return
+		}
+
+		_ = tmpl.Execute(w, newJob)
+	}
 }
 
 func (s *Server) getJobs(w http.ResponseWriter, r *http.Request) {
@@ -784,6 +862,185 @@ func (s *Server) apiViewJSON(w http.ResponseWriter, r *http.Request) {
 	}
 
 	renderJSON(w, http.StatusOK, jsonData)
+}
+
+type previewEntry struct {
+	Title       string   `json:"title"`
+	Category    string   `json:"category"`
+	Address     string   `json:"address"`
+	Phone       string   `json:"phone"`
+	WebSite     string   `json:"web_site"`
+	ReviewCount int      `json:"review_count"`
+	Rating      float64  `json:"review_rating"`
+	Emails      []string `json:"emails"`
+}
+
+type previewData struct {
+	Entries    []previewEntry
+	JobID      string
+	Page       int
+	TotalPages int
+	Total      int
+	HasPrev    bool
+	HasNext    bool
+	PrevPage   int
+	NextPage   int
+}
+
+func (s *Server) preview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+
+		return
+	}
+
+	id, ok := getIDFromRequest(r)
+	if !ok {
+		http.Error(w, "Invalid ID", http.StatusUnprocessableEntity)
+
+		return
+	}
+
+	filePath, err := s.svc.GetJSON(r.Context(), id.String())
+	if err != nil {
+		http.Error(w, "Results not found", http.StatusNotFound)
+
+		return
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		http.Error(w, "Failed to read results", http.StatusInternalServerError)
+
+		return
+	}
+
+	var entries []previewEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		http.Error(w, "Failed to parse results", http.StatusInternalServerError)
+
+		return
+	}
+
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+
+	const perPage = 15
+
+	total := len(entries)
+	totalPages := (total + perPage - 1) / perPage
+
+	if page > totalPages && totalPages > 0 {
+		page = totalPages
+	}
+
+	start := (page - 1) * perPage
+	end := start + perPage
+
+	if end > total {
+		end = total
+	}
+
+	var pageEntries []previewEntry
+	if start < total {
+		pageEntries = entries[start:end]
+	}
+
+	pdata := previewData{
+		Entries:    pageEntries,
+		JobID:      id.String(),
+		Page:       page,
+		TotalPages: totalPages,
+		Total:      total,
+		HasPrev:    page > 1,
+		HasNext:    page < totalPages,
+		PrevPage:   page - 1,
+		NextPage:   page + 1,
+	}
+
+	tmpl, ok := s.tmpl["static/templates/preview.html"]
+	if !ok {
+		http.Error(w, "missing tpl", http.StatusInternalServerError)
+
+		return
+	}
+
+	_ = tmpl.Execute(w, pdata)
+}
+
+func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+
+		return
+	}
+
+	tmpl, ok := s.tmpl["static/templates/settings.html"]
+	if !ok {
+		http.Error(w, "missing tpl", http.StatusInternalServerError)
+
+		return
+	}
+
+	settings, _ := s.svc.GetSettings(r.Context())
+
+	_ = tmpl.Execute(w, settings)
+}
+
+func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+
+		return
+	}
+
+	settings := Settings{
+		Language: r.Form.Get("language"),
+		MaxTime:  r.Form.Get("maxtime"),
+		Email:    r.Form.Get("email") == "on",
+	}
+
+	depth, err := strconv.Atoi(r.Form.Get("depth"))
+	if err != nil {
+		http.Error(w, "invalid depth", http.StatusUnprocessableEntity)
+
+		return
+	}
+
+	settings.Depth = depth
+
+	proxiesStr := r.Form.Get("proxies")
+	if proxiesStr != "" {
+		for _, p := range strings.Split(proxiesStr, "\n") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				settings.Proxies = append(settings.Proxies, p)
+			}
+		}
+	}
+
+	if err := s.svc.SaveSettings(r.Context(), &settings); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+
+		return
+	}
+
+	tmpl, ok := s.tmpl["static/templates/settings_success.html"]
+	if !ok {
+		http.Error(w, "missing tpl", http.StatusInternalServerError)
+
+		return
+	}
+
+	_ = tmpl.Execute(w, nil)
 }
 
 func renderJSON(w http.ResponseWriter, code int, data any) {

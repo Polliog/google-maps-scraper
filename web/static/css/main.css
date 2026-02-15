@@ -355,3 +355,346 @@ nav a:hover {
     transform: translateY(-1px);
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
+
+/* Form hints */
+.form-hint {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--color-text-light);
+    line-height: 1.4;
+}
+
+.form-hint strong {
+    font-weight: 600;
+}
+
+.fastmode-required {
+    color: var(--color-text-light);
+    transition: color 0.2s;
+}
+
+.fastmode-required.active {
+    color: var(--color-error);
+}
+
+/* Checkbox groups */
+.form-group.checkbox {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.form-group.checkbox label {
+    display: inline;
+    margin-bottom: 0;
+}
+
+.form-group.checkbox .form-hint {
+    flex-basis: 100%;
+}
+
+/* Proxy examples */
+.proxy-examples {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 8px 0;
+    padding: 8px 12px;
+    background-color: var(--color-background);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+}
+
+.proxy-examples code {
+    font-size: 11px;
+    color: var(--color-text-light);
+    word-break: break-all;
+}
+
+/* Invalid field highlight */
+input:invalid:not(:placeholder-shown):not(:focus),
+textarea:invalid:not(:placeholder-shown):not(:focus) {
+    border-color: var(--color-error);
+}
+
+input:valid:not(:placeholder-shown),
+textarea:valid:not(:placeholder-shown) {
+    border-color: var(--color-success);
+}
+
+/* Spinner */
+.spinner {
+    display: none;
+    width: 32px;
+    height: 32px;
+    margin: 16px auto;
+    border: 3px solid var(--color-border);
+    border-top-color: var(--color-primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+.htmx-request .spinner, .spinner.htmx-request {
+    display: block;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Primary action button */
+.primary-button {
+    width: 100%;
+    background-color: var(--color-success);
+    font-size: 16px;
+    font-weight: 600;
+    padding: 14px 20px;
+    margin-top: 4px;
+}
+
+.primary-button:hover {
+    background-color: #388e3c;
+}
+
+/* Settings info bar */
+.settings-info {
+    margin-top: 16px;
+    padding: 10px 14px;
+    background-color: var(--color-background);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    font-size: 13px;
+    color: var(--color-text-light);
+    text-align: center;
+    line-height: 1.6;
+}
+
+.settings-info a {
+    color: var(--color-primary);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.settings-info a:hover {
+    text-decoration: underline;
+}
+
+/* Override section */
+.override-section {
+    margin-top: 8px;
+}
+
+.override-section > summary {
+    font-size: 13px;
+    color: var(--color-text-light);
+}
+
+/* Settings page */
+.settings-main {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 40px 20px;
+}
+
+.settings-container {
+    max-width: 560px;
+    width: 100%;
+    background-color: var(--color-surface);
+    padding: 32px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.settings-description {
+    margin: 0 0 24px 0;
+    color: var(--color-text-light);
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+/* Success message */
+.success-message {
+    background-color: #e8f5e9;
+    border: 1px solid var(--color-success);
+    color: #2e7d32;
+    padding: 12px 16px;
+    border-radius: 4px;
+    margin-bottom: 20px;
+    font-size: 14px;
+}
+
+/* File import */
+.keywords-actions {
+    margin-top: 8px;
+    display: flex;
+    gap: 8px;
+}
+
+.file-import-label {
+    display: inline-block;
+    padding: 4px 10px;
+    font-size: 12px;
+    color: var(--color-primary);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    margin-bottom: 0;
+}
+
+.file-import-label:hover {
+    background-color: var(--color-background);
+}
+
+.file-import-input {
+    display: none;
+}
+
+textarea.drag-over {
+    border-color: var(--color-primary) !important;
+    background-color: #f0f0f0;
+}
+
+/* Action buttons in job table */
+.actions-cell {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+}
+
+.clone-button {
+    background-color: var(--color-primary);
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    text-decoration: none;
+    color: white;
+}
+
+.preview-button {
+    background-color: #1976d2;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: white;
+    border: none;
+    cursor: pointer;
+}
+
+.preview-button:hover {
+    background-color: #1565c0;
+}
+
+.view-button {
+    background-color: #607d8b;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    text-decoration: none;
+    color: white;
+}
+
+/* Preview area */
+.preview-container {
+    margin-top: 24px;
+    background-color: var(--color-surface);
+    border-radius: 4px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+}
+
+.preview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background-color: var(--color-background);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.preview-count {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--color-text);
+}
+
+.preview-page {
+    font-size: 13px;
+    color: var(--color-text-light);
+}
+
+.preview-close {
+    padding: 4px 12px;
+    font-size: 12px;
+    background-color: var(--color-text-light);
+}
+
+.preview-close:hover {
+    background-color: var(--color-text);
+}
+
+.preview-table {
+    width: 100%;
+    font-size: 13px;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.preview-table th {
+    font-size: 12px;
+    padding: 10px 12px;
+    white-space: nowrap;
+}
+
+.preview-table td {
+    padding: 8px 12px;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cell-title {
+    font-weight: 500;
+    max-width: 180px;
+}
+
+.cell-address {
+    max-width: 200px;
+}
+
+.cell-website a {
+    color: var(--color-primary);
+    text-decoration: none;
+}
+
+.cell-emails {
+    max-width: 180px;
+    font-size: 12px;
+    color: var(--color-text-light);
+}
+
+.preview-pagination {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--color-border);
+}
+
+.page-btn {
+    padding: 6px 16px;
+    font-size: 13px;
+    background-color: var(--color-primary);
+}
+
+.preview-empty {
+    padding: 24px;
+    text-align: center;
+    color: var(--color-text-light);
+    font-size: 14px;
+}

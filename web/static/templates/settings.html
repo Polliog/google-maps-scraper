@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - Google Maps Scraper</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.6/htmx.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <h1>Settings</h1>
+            <nav>
+                <a href="/">Back to Scraper</a>
+                <a href="/api/docs" target="_blank" rel="noopener noreferrer">API Documentation</a>
+            </nav>
+            <small>Fork By Polliog</small>
+        </header>
+        <main class="settings-main">
+            <div class="settings-container">
+                <div id="success-message"></div>
+                <p class="settings-description">
+                    Configure default values for new scraping jobs. These will pre-fill the scrape form
+                    and can be overridden per-job.
+                </p>
+                <form
+                    hx-post="/settings/save"
+                    hx-target="#success-message"
+                    hx-swap="innerHTML"
+                >
+                    <fieldset>
+                        <legend>Default Scraping Options</legend>
+
+                        <div class="form-group">
+                            <label for="language">Language:</label>
+                            <input type="text" id="language" name="language" value="{{.Language}}" required minlength="2" maxlength="2" pattern="[a-zA-Z]{2}">
+                            <span class="form-hint">ISO 639-1 code (2 letters). Examples: en, it, de, es, fr, pt.</span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="depth">Depth:</label>
+                            <input type="number" step="1" id="depth" name="depth" value="{{.Depth}}" required min="1">
+                            <span class="form-hint">Number of scroll iterations on the results page. Each iteration loads ~20 results.</span>
+                        </div>
+
+                        <div class="form-group checkbox">
+                            <input type="checkbox" id="email" name="email" {{if .Email}}checked{{end}}>
+                            <label for="email">Fetch Emails by Default</label>
+                            <span class="form-hint">Visit each result's website to extract email addresses. Increases scraping time.</span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="maxtime">Max Job Time:</label>
+                            <input type="text" id="maxtime" name="maxtime" value="{{.MaxTime}}" required placeholder="e.g. 10m, 1h30m, 2h">
+                            <span class="form-hint">Go duration format: "10m" (10 min), "1h30m" (1.5 hours), "2h" (2 hours). Minimum: 1m.</span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="proxies">Default Proxies (one per line):</label>
+                            <span class="form-hint">These proxies will be used for all jobs unless overridden.</span>
+                            <textarea id="proxies" name="proxies" rows="4" placeholder="Leave empty to connect directly">{{range $i, $p := .Proxies}}{{if $i}}&#10;{{end}}{{$p}}{{end}}</textarea>
+                        </div>
+                    </fieldset>
+
+                    <button type="submit">Save Settings</button>
+                </form>
+            </div>
+        </main>
+    </div>
+</body>
+</html>

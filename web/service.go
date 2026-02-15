@@ -85,6 +85,42 @@ func (s *Service) GetCSV(_ context.Context, id string) (string, error) {
 	return datapath, nil
 }
 
+func (s *Service) GetSettings(ctx context.Context) (Settings, error) {
+	repo, ok := s.repo.(SettingsRepository)
+	if !ok {
+		settings := Settings{}
+		settings.ApplyDefaults()
+
+		return settings, nil
+	}
+
+	settings, err := repo.GetSettings(ctx)
+	if err != nil {
+		settings.ApplyDefaults()
+
+		return settings, nil
+	}
+
+	settings.ApplyDefaults()
+
+	return settings, nil
+}
+
+func (s *Service) SaveSettings(ctx context.Context, settings *Settings) error {
+	repo, ok := s.repo.(SettingsRepository)
+	if !ok {
+		return fmt.Errorf("settings not supported by repository")
+	}
+
+	if err := settings.Validate(); err != nil {
+		return err
+	}
+
+	settings.ApplyDefaults()
+
+	return repo.UpsertSettings(ctx, settings)
+}
+
 // GetJSON restituisce il percorso del file JSON per un job
 func (s *Service) GetJSON(_ context.Context, id string) (string, error) {
 	if strings.Contains(id, "/") || strings.Contains(id, "\\") || strings.Contains(id, "..") {
