@@ -105,7 +105,18 @@ func (j *PlaceJob) Process(_ context.Context, resp *scrapemate.Response) (any, [
 		j.UsageInResultststs = false
 
 		return nil, []scrapemate.IJob{emailJob}, nil
-	} else if j.ExitMonitor != nil {
+	}
+
+	if j.ExtractEmail {
+		if entry.WebSite == "" {
+			entry.EmailStatus = "no_website"
+		} else {
+			entry.EmailStatus = "blocked_domain"
+		}
+		entry.Emails = []string{}
+	}
+
+	if j.ExitMonitor != nil {
 		j.ExitMonitor.IncrPlacesCompleted(1)
 	}
 
