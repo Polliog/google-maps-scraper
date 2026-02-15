@@ -124,19 +124,35 @@ func (e *Entry) isWithinRadius(lat, lon, radius float64) bool {
 	return distance <= radius
 }
 
+// IsWebsiteValidForEmail reports whether the entry's website is suitable
+// for email extraction. Social-media profiles and URLs without a valid
+// HTTP(S) scheme are rejected.
 func (e *Entry) IsWebsiteValidForEmail() bool {
 	if e.WebSite == "" {
 		return false
 	}
 
-	needles := []string{
-		"facebook",
-		"instragram",
-		"twitter",
+	lower := strings.ToLower(e.WebSite)
+
+	// Require a valid HTTP or HTTPS scheme.
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		return false
 	}
 
-	for i := range needles {
-		if strings.Contains(e.WebSite, needles[i]) {
+	blockedDomains := []string{
+		"facebook",
+		"instagram",
+		"twitter",
+		"linkedin",
+		"youtube",
+		"tiktok",
+		"pinterest",
+		"yelp",
+		"tripadvisor",
+	}
+
+	for _, needle := range blockedDomains {
+		if strings.Contains(lower, needle) {
 			return false
 		}
 	}
