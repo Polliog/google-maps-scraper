@@ -15,6 +15,8 @@ type EmailExtractJob struct {
 
 	Entry       *Entry
 	ExitMonitor exiter.Exiter
+
+	browserPage scrapemate.BrowserPage
 }
 
 func NewEmailJob(parentID string, entry *Entry, opts ...EmailExtractJobOptions) *EmailExtractJob {
@@ -49,6 +51,15 @@ func WithEmailJobExitMonitor(exitMonitor exiter.Exiter) EmailExtractJobOptions {
 	}
 }
 
+// BrowserActions captures the browser page reference for Level 3 email
+// extraction and returns an empty response (no navigation needed here;
+// the email pipeline navigates on its own).
+func (j *EmailExtractJob) BrowserActions(_ context.Context, page scrapemate.BrowserPage) scrapemate.Response {
+	j.browserPage = page
+
+	return scrapemate.Response{}
+}
+
 func (j *EmailExtractJob) Process(ctx context.Context, resp *scrapemate.Response) (any, []scrapemate.IJob, error) {
 	defer func() {
 		resp.Document = nil
@@ -64,7 +75,12 @@ func (j *EmailExtractJob) Process(ctx context.Context, resp *scrapemate.Response
 	log := scrapemate.GetLoggerFromContext(ctx)
 	log.Info("Processing email pipeline", "url", j.URL)
 
-	pipeline := NewEmailPipeline(j.Entry, nil)
+	var fetcher BrowserFetcher
+	if j.browserPage != nil {
+		fetcher = &pageBrowserFetcher{page: j.browserPage}
+	}
+
+	pipeline := NewEmailPipeline(j.Entry, fetcher)
 
 	if err := pipeline.Run(ctx); err != nil {
 		log.Warn("Email pipeline failed", "url", j.URL, "error", err)
