@@ -275,39 +275,57 @@ func scroll(ctx context.Context,
 	maxDepth int,
 	scrollSelector string,
 ) (int, error) {
-	expr := `async () => {
+	scrollExpr := `async () => {
 		const el = document.querySelector("` + scrollSelector + `");
 		el.scrollTop = el.scrollHeight;
 
-		return new Promise((resolve, reject) => {
-  			setTimeout(() => {
-    		resolve(el.scrollHeight);
-  			}, %d);
+		return new Promise((resolve) => {
+			setTimeout(() => {
+				resolve(el.scrollHeight);
+			}, %d);
 		});
 	}`
 
+	endOfListExpr := `() => {
+		const el = document.querySelector("` + scrollSelector + `");
+		if (!el) return false;
+		const lastChild = el.lastElementChild;
+		if (!lastChild) return false;
+		// Google Maps shows an end-of-list marker as the last child
+		// that contains a span inside a p.fontBodyMedium but no clickable links
+		if (lastChild.querySelector('a[href]')) return false;
+		const endMarker = lastChild.querySelector('span span');
+		return endMarker !== null;
+	}`
+
 	var currentScrollHeight int
-	// Scroll to the bottom of the page.
-	waitTime := 100.
-	cnt := 0
+	scrollCount := 0
+	staleCount := 0
 
 	const (
-		timeout  = 500
-		maxWait2 = 2000
+		maxStaleRetries  = 3    // retry up to 3 times when scroll height doesn't change
+		baseJsWaitMs     = 1500 // base wait for JS scroll to load new content
+		staleExtraWaitMs = 1000 // extra wait per stale retry
+		maxJsWaitMs      = 5000 // max JS wait time
+		betweenScrollMs  = 500  // pause between successful scrolls
 	)
 
-	for i := 0; i < maxDepth; i++ {
-		cnt++
-		waitTime2 := timeout * cnt
-
-		if waitTime2 > timeout {
-			waitTime2 = maxWait2
+	for scrollCount < maxDepth {
+		select {
+		case <-ctx.Done():
+			return scrollCount, nil
+		default:
 		}
 
-		// Scroll to the bottom of the page.
-		scrollHeight, err := page.Eval(fmt.Sprintf(expr, waitTime2))
+		// Increase JS wait time when retrying stale scrolls
+		jsWait := baseJsWaitMs + (staleCount * staleExtraWaitMs)
+		if jsWait > maxJsWaitMs {
+			jsWait = maxJsWaitMs
+		}
+
+		scrollHeight, err := page.Eval(fmt.Sprintf(scrollExpr, jsWait))
 		if err != nil {
-			return cnt, err
+			return scrollCount, err
 		}
 
 		// Handle both int and float64 (go-rod returns float64 for numbers)
@@ -318,29 +336,36 @@ func scroll(ctx context.Context,
 		case float64:
 			height = int(v)
 		default:
-			return cnt, fmt.Errorf("scrollHeight is not a number, got %T", scrollHeight)
+			return scrollCount, fmt.Errorf("scrollHeight is not a number, got %T", scrollHeight)
 		}
 
 		if height == currentScrollHeight {
-			break
+			staleCount++
+			if staleCount >= maxStaleRetries {
+				break // no more content after multiple retries
+			}
+
+			// Wait before retrying
+			page.WaitForTimeout(time.Duration(staleExtraWaitMs) * time.Millisecond)
+
+			continue // don't count stale scrolls toward maxDepth
 		}
 
+		// New content loaded
+		staleCount = 0
 		currentScrollHeight = height
+		scrollCount++
 
-		select {
-		case <-ctx.Done():
-			return currentScrollHeight, nil
-		default:
+		// Check for end-of-list marker
+		endResult, endErr := page.Eval(endOfListExpr)
+		if endErr == nil {
+			if isEnd, ok := endResult.(bool); ok && isEnd {
+				break // reached the end of Google Maps results
+			}
 		}
 
-		waitTime *= 1.5
-
-		if waitTime > maxWait2 {
-			waitTime = maxWait2
-		}
-
-		page.WaitForTimeout(time.Duration(waitTime) * time.Millisecond)
+		page.WaitForTimeout(time.Duration(betweenScrollMs) * time.Millisecond)
 	}
 
-	return cnt, nil
+	return scrollCount, nil
 }
