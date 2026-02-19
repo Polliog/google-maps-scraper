@@ -17,21 +17,24 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gosom/google-maps-scraper/gmaps"
 )
 
 //go:embed static
 var static embed.FS
 
 type Server struct {
-	tmpl map[string]*template.Template
-	srv  *http.Server
-	svc  *Service
+	tmpl     map[string]*template.Template
+	srv      *http.Server
+	svc      *Service
+	apiToken string
 }
 
-func New(svc *Service, addr string) (*Server, error) {
+func New(svc *Service, addr string, apiToken string) (*Server, error) {
 	ans := Server{
-		svc:  svc,
-		tmpl: make(map[string]*template.Template),
+		svc:      svc,
+		apiToken: apiToken,
+		tmpl:     make(map[string]*template.Template),
 		srv: &http.Server{
 			Addr:              addr,
 			ReadHeaderTimeout: 10 * time.Second,
@@ -164,7 +167,42 @@ func New(svc *Service, addr string) (*Server, error) {
 		ans.apiViewJSON(w, r)
 	})
 
-	handler := securityHeaders(mux)
+	mux.HandleFunc("/api/v1/jobs/{id}/records", func(w http.ResponseWriter, r *http.Request) {
+		r = requestWithID(r)
+
+		if r.Method != http.MethodGet {
+			resp := apiError{
+				Code:    http.StatusMethodNotAllowed,
+				Message: "Method not allowed",
+			}
+
+			renderJSON(w, http.StatusMethodNotAllowed, resp)
+
+			return
+		}
+
+		ans.apiGetRecords(w, r)
+	})
+
+	mux.HandleFunc("/api/v1/jobs/{id}/records/{recordId}", func(w http.ResponseWriter, r *http.Request) {
+		r = requestWithID(r)
+
+		switch r.Method {
+		case http.MethodPut:
+			ans.apiUpdateRecord(w, r)
+		case http.MethodDelete:
+			ans.apiDeleteRecord(w, r)
+		default:
+			resp := apiError{
+				Code:    http.StatusMethodNotAllowed,
+				Message: "Method not allowed",
+			}
+
+			renderJSON(w, http.StatusMethodNotAllowed, resp)
+		}
+	})
+
+	handler := apiAuthMiddleware(apiToken, securityHeaders(mux))
 	ans.srv.Handler = handler
 
 	tmplsKeys := []string{
@@ -226,6 +264,7 @@ type formData struct {
 	Depth    int
 	Email    bool
 	Proxies  []string
+	APIToken string
 }
 
 type ctxKey string
@@ -291,6 +330,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		Depth:    settings.Depth,
 		Email:    settings.Email,
 		Proxies:  settings.Proxies,
+		APIToken: s.apiToken,
 	}
 
 	if cloneID := r.URL.Query().Get("clone"); cloneID != "" {
@@ -864,6 +904,201 @@ func (s *Server) apiViewJSON(w http.ResponseWriter, r *http.Request) {
 	renderJSON(w, http.StatusOK, jsonData)
 }
 
+type apiRecord struct {
+	ID           int     `json:"id"`
+	JobID        string  `json:"job_id"`
+	Title        string  `json:"title"`
+	Address      string  `json:"address"`
+	Phone        string  `json:"phone"`
+	Website      string  `json:"website"`
+	Email        string  `json:"email"`
+	Category     string  `json:"category"`
+	Rating       float64 `json:"rating"`
+	ReviewsCount int     `json:"reviews_count"`
+	Latitude     float64 `json:"latitude"`
+	Longitude    float64 `json:"longitude"`
+	PlaceID      string  `json:"place_id"`
+	GoogleURL    string  `json:"google_url"`
+}
+
+type apiRecordsResponse struct {
+	Records  []apiRecord `json:"records"`
+	Total    int         `json:"total"`
+	Page     int         `json:"page"`
+	PageSize int         `json:"pageSize"`
+}
+
+func entryToRecord(e *gmaps.Entry, idx int, jobID string) apiRecord {
+	return apiRecord{
+		ID:           idx + 1,
+		JobID:        jobID,
+		Title:        e.Title,
+		Address:      e.Address,
+		Phone:        e.Phone,
+		Website:      e.WebSite,
+		Email:        strings.Join(e.Emails, ", "),
+		Category:     e.Category,
+		Rating:       e.ReviewRating,
+		ReviewsCount: e.ReviewCount,
+		Latitude:     e.Latitude,
+		Longitude:    e.Longtitude,
+		PlaceID:      e.PlaceID,
+		GoogleURL:    e.Link,
+	}
+}
+
+func (s *Server) apiGetRecords(w http.ResponseWriter, r *http.Request) {
+	id, ok := getIDFromRequest(r)
+	if !ok {
+		renderJSON(w, http.StatusUnprocessableEntity, apiError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: "Invalid ID",
+		})
+
+		return
+	}
+
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+
+	pageSize, _ := strconv.Atoi(r.URL.Query().Get("pageSize"))
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 25
+	}
+
+	search := r.URL.Query().Get("search")
+
+	indexed, total, err := s.svc.GetRecords(r.Context(), id.String(), page, pageSize, search)
+	if err != nil {
+		renderJSON(w, http.StatusNotFound, apiError{
+			Code:    http.StatusNotFound,
+			Message: err.Error(),
+		})
+
+		return
+	}
+
+	records := make([]apiRecord, 0, len(indexed))
+
+	for i := range indexed {
+		records = append(records, entryToRecord(&indexed[i].Entry, indexed[i].Index, id.String()))
+	}
+
+	renderJSON(w, http.StatusOK, apiRecordsResponse{
+		Records:  records,
+		Total:    total,
+		Page:     page,
+		PageSize: pageSize,
+	})
+}
+
+func (s *Server) apiUpdateRecord(w http.ResponseWriter, r *http.Request) {
+	id, ok := getIDFromRequest(r)
+	if !ok {
+		renderJSON(w, http.StatusUnprocessableEntity, apiError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: "Invalid ID",
+		})
+
+		return
+	}
+
+	recordID, err := strconv.Atoi(r.PathValue("recordId"))
+	if err != nil || recordID < 1 {
+		renderJSON(w, http.StatusUnprocessableEntity, apiError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: "Invalid record ID",
+		})
+
+		return
+	}
+
+	var updates map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+		renderJSON(w, http.StatusUnprocessableEntity, apiError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: "Invalid request body",
+		})
+
+		return
+	}
+
+	entry, err := s.svc.UpdateRecord(r.Context(), id.String(), recordID, updates)
+	if err != nil {
+		if err == ErrNotFound {
+			renderJSON(w, http.StatusNotFound, apiError{
+				Code:    http.StatusNotFound,
+				Message: "Record not found",
+			})
+
+			return
+		}
+
+		if strings.HasPrefix(err.Error(), "field '") {
+			renderJSON(w, http.StatusUnprocessableEntity, apiError{
+				Code:    http.StatusUnprocessableEntity,
+				Message: err.Error(),
+			})
+
+			return
+		}
+
+		renderJSON(w, http.StatusInternalServerError, apiError{
+			Code:    http.StatusInternalServerError,
+			Message: err.Error(),
+		})
+
+		return
+	}
+
+	renderJSON(w, http.StatusOK, entryToRecord(&entry, recordID-1, id.String()))
+}
+
+func (s *Server) apiDeleteRecord(w http.ResponseWriter, r *http.Request) {
+	id, ok := getIDFromRequest(r)
+	if !ok {
+		renderJSON(w, http.StatusUnprocessableEntity, apiError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: "Invalid ID",
+		})
+
+		return
+	}
+
+	recordID, err := strconv.Atoi(r.PathValue("recordId"))
+	if err != nil || recordID < 1 {
+		renderJSON(w, http.StatusUnprocessableEntity, apiError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: "Invalid record ID",
+		})
+
+		return
+	}
+
+	err = s.svc.DeleteRecord(r.Context(), id.String(), recordID)
+	if err != nil {
+		if err == ErrNotFound {
+			renderJSON(w, http.StatusNotFound, apiError{
+				Code:    http.StatusNotFound,
+				Message: "Record not found",
+			})
+
+			return
+		}
+
+		renderJSON(w, http.StatusInternalServerError, apiError{
+			Code:    http.StatusInternalServerError,
+			Message: err.Error(),
+		})
+
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 type previewEntry struct {
 	Title       string   `json:"title"`
 	Category    string   `json:"category"`
@@ -986,7 +1221,15 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 
 	settings, _ := s.svc.GetSettings(r.Context())
 
-	_ = tmpl.Execute(w, settings)
+	data := struct {
+		Settings
+		APIToken string
+	}{
+		Settings: settings,
+		APIToken: s.apiToken,
+	}
+
+	_ = tmpl.Execute(w, data)
 }
 
 func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
@@ -1052,6 +1295,24 @@ func renderJSON(w http.ResponseWriter, code int, data any) {
 
 func formatDate(t time.Time) string {
 	return t.Format("Jan 02, 2006 15:04:05")
+}
+
+func apiAuthMiddleware(token string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if token != "" && strings.HasPrefix(r.URL.Path, "/api/v1/") {
+			auth := r.Header.Get("Authorization")
+			if auth != "Bearer "+token {
+				renderJSON(w, http.StatusUnauthorized, apiError{
+					Code:    http.StatusUnauthorized,
+					Message: "Unauthorized",
+				})
+
+				return
+			}
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func securityHeaders(next http.Handler) http.Handler {

@@ -79,6 +79,7 @@ type Config struct {
 	Addr                     string
 	DisablePageReuse         bool
 	ExtraReviews             bool
+	APIToken                 string
 }
 
 func ParseConfig() *Config {
@@ -125,8 +126,13 @@ func ParseConfig() *Config {
 	flag.StringVar(&cfg.Addr, "addr", ":8080", "address to listen on for web server")
 	flag.BoolVar(&cfg.DisablePageReuse, "disable-page-reuse", false, "disable page reuse in playwright")
 	flag.BoolVar(&cfg.ExtraReviews, "extra-reviews", false, "enable extra reviews collection")
+	flag.StringVar(&cfg.APIToken, "api-token", "", "API token for authenticating /api/v1/* requests")
 
 	flag.Parse()
+
+	if cfg.APIToken == "" {
+		cfg.APIToken = os.Getenv("API_TOKEN")
+	}
 
 	if cfg.AwsAccessKey == "" {
 		cfg.AwsAccessKey = os.Getenv("MY_AWS_ACCESS_KEY")

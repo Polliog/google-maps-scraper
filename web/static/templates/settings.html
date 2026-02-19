@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Settings - Google Maps Scraper</title>
     <link rel="stylesheet" href="/static/css/main.css">
+    <meta name="api-token" content="{{.APIToken}}">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.6/htmx.min.js"></script>
 </head>
 <body>
@@ -65,6 +66,20 @@
 
                     <button type="submit">Save Settings</button>
                 </form>
+
+                {{if .APIToken}}
+                <fieldset style="margin-top: 2rem;">
+                    <legend>API Authentication</legend>
+                    <div class="form-group">
+                        <label for="api-token">API Token:</label>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <input type="text" id="api-token" value="{{.APIToken}}" readonly style="flex: 1; font-family: monospace;">
+                            <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('api-token').value).then(function(){var b=event.target;b.textContent='Copied!';setTimeout(function(){b.textContent='Copy'},1500)})">Copy</button>
+                        </div>
+                        <span class="form-hint">Use this token in the <code>Authorization: Bearer &lt;token&gt;</code> header for API requests.</span>
+                    </div>
+                </fieldset>
+                {{end}}
             </div>
         </main>
     </div>
