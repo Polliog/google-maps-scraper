@@ -25,9 +25,10 @@ type GmapJob struct {
 	LangCode     string
 	ExtractEmail bool
 
-	Deduper             deduper.Deduper
-	ExitMonitor         exiter.Exiter
-	ExtractExtraReviews bool
+	Deduper                 deduper.Deduper
+	ExitMonitor             exiter.Exiter
+	ExtractExtraReviews     bool
+	WriterManagedCompletion bool
 }
 
 func NewGmapJob(
@@ -96,8 +97,18 @@ func WithExtraReviews() GmapJobOptions {
 	}
 }
 
+func WithWriterManagedCompletion() GmapJobOptions {
+	return func(j *GmapJob) {
+		j.WriterManagedCompletion = true
+	}
+}
+
 func (j *GmapJob) UseInResults() bool {
 	return false
+}
+
+func (j *GmapJob) ProcessOnFetchError() bool {
+	return true
 }
 
 func (j *GmapJob) Process(ctx context.Context, resp *scrapemate.Response) (any, []scrapemate.IJob, error) {
@@ -106,10 +117,22 @@ func (j *GmapJob) Process(ctx context.Context, resp *scrapemate.Response) (any, 
 		resp.Body = nil
 	}()
 
+	if resp.Error != nil {
+		if j.ExitMonitor != nil {
+			j.ExitMonitor.IncrSeedCompleted(1)
+		}
+
+		return nil, nil, resp.Error
+	}
+
 	log := scrapemate.GetLoggerFromContext(ctx)
 
 	doc, ok := resp.Document.(*goquery.Document)
 	if !ok {
+		if j.ExitMonitor != nil {
+			j.ExitMonitor.IncrSeedCompleted(1)
+		}
+
 		return nil, nil, fmt.Errorf("could not convert to goquery document")
 	}
 
@@ -121,6 +144,10 @@ func (j *GmapJob) Process(ctx context.Context, resp *scrapemate.Response) (any, 
 			jopts = append(jopts, WithPlaceJobExitMonitor(j.ExitMonitor))
 		}
 
+		if j.WriterManagedCompletion {
+			jopts = append(jopts, WithPlaceJobWriterManagedCompletion())
+		}
+
 		placeJob := NewPlaceJob(j.ID, j.LangCode, resp.URL, j.ExtractEmail, j.ExtractExtraReviews, jopts...)
 
 		next = append(next, placeJob)
@@ -130,6 +157,10 @@ func (j *GmapJob) Process(ctx context.Context, resp *scrapemate.Response) (any, 
 				jopts := []PlaceJobOptions{}
 				if j.ExitMonitor != nil {
 					jopts = append(jopts, WithPlaceJobExitMonitor(j.ExitMonitor))
+				}
+
+				if j.WriterManagedCompletion {
+					jopts = append(jopts, WithPlaceJobWriterManagedCompletion())
 				}
 
 				nextJob := NewPlaceJob(j.ID, j.LangCode, href, j.ExtractEmail, j.ExtractExtraReviews, jopts...)
@@ -165,12 +196,8 @@ func (j *GmapJob) BrowserActions(ctx context.Context, page scrapemate.BrowserPag
 
 	const defaultTimeout = 5 * time.Second
 
-	err = page.WaitForURL(page.URL(), defaultTimeout)
-	if err != nil {
-		resp.Error = err
-
-		return resp
-	}
+	// Ignore WaitForURL errors — Google Maps may redirect slowly especially via proxy
+	_ = page.WaitForURL(page.URL(), defaultTimeout)
 
 	resp.URL = pageResponse.URL
 	resp.StatusCode = pageResponse.StatusCode
@@ -180,7 +207,7 @@ func (j *GmapJob) BrowserActions(ctx context.Context, page scrapemate.BrowserPag
 	// check element scroll
 	sel := `div[role='feed']`
 
-	err = page.WaitForSelector(sel, 700*time.Millisecond)
+	err = page.WaitForSelector(sel, 10*time.Second)
 
 	var singlePlace bool
 
