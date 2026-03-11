@@ -81,8 +81,8 @@ func discoverContactPages(doc *goquery.Document, baseURL string) []string {
 
 		resolved := base.ResolveReference(parsed)
 
-		// Only same host.
-		if resolved.Host != base.Host {
+		// Only same host or subdomain.
+		if !isSameOrSubdomain(resolved.Host, base.Host) {
 			return
 		}
 

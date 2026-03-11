@@ -19,7 +19,6 @@ require (
 	github.com/gosom/scrapemate v1.0.0
 	github.com/hetznercloud/hcloud-go/v2 v2.36.0
 	github.com/jackc/pgx/v5 v5.8.0
-	github.com/joho/godotenv v1.5.1
 	github.com/mattn/go-runewidth v0.0.16
 	github.com/mcnijman/go-emailaddress v1.1.1
 	github.com/playwright-community/playwright-go v0.5200.1

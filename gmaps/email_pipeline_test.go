@@ -81,13 +81,15 @@ func TestEmailPipelineNoEmails(t *testing.T) {
 }
 
 func TestEmailPipelineWebsiteError(t *testing.T) {
-	// Use an address that will refuse connections
+	// Use an address that will refuse connections.
+	// With no browser fallback (nil), the pipeline should end with "not_found"
+	// since Level 1 failure no longer aborts the pipeline.
 	entry := &Entry{WebSite: "http://127.0.0.1:1"}
 	pipeline := NewEmailPipeline(entry, nil)
 
 	err := pipeline.Run(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, "website_error", entry.EmailStatus)
+	require.Equal(t, "not_found", entry.EmailStatus)
 }
 
 type mockBrowserFetcher struct {

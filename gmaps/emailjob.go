@@ -67,7 +67,7 @@ func WithEmailJobWriterManagedCompletion() EmailExtractJobOptions {
 func (j *EmailExtractJob) BrowserActions(_ context.Context, page scrapemate.BrowserPage) scrapemate.Response {
 	j.browserPage = page
 
-	return scrapemate.Response{}
+	return scrapemate.Response{StatusCode: 200}
 }
 
 func (j *EmailExtractJob) Process(ctx context.Context, resp *scrapemate.Response) (any, []scrapemate.IJob, error) {

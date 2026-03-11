@@ -9,8 +9,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/joho/godotenv"
-
 	"github.com/gosom/google-maps-scraper/runner"
 	"github.com/gosom/google-maps-scraper/runner/databaserunner"
 	"github.com/gosom/google-maps-scraper/runner/filerunner"
@@ -20,8 +18,6 @@ import (
 )
 
 func main() {
-	_ = godotenv.Load()
-
 	ctx, cancel := context.WithCancel(context.Background())
 
 	runner.Banner()
