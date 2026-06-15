@@ -289,6 +289,8 @@ func (w *webrunner) setupMate(_ context.Context, csvWriter, jsonWriter io.Writer
 		)
 	}
 
+	opts = runner.AppendBrowserCapacityOptions(opts, w.cfg)
+
 	hasProxy := false
 
 	if len(w.cfg.Proxies) > 0 {
