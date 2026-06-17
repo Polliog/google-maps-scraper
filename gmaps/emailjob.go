@@ -20,7 +20,7 @@ type EmailExtractJob struct {
 	ExitMonitor             exiter.Exiter
 	WriterManagedCompletion bool
 
-	browserPage scrapemate.BrowserPage
+	pipelineRan bool
 }
 
 func NewEmailJob(parentID string, entry *Entry, opts ...EmailExtractJobOptions) *EmailExtractJob {
@@ -61,11 +61,18 @@ func WithEmailJobWriterManagedCompletion() EmailExtractJobOptions {
 	}
 }
 
-// BrowserActions captures the browser page reference for Level 3 email
-// extraction and returns an empty response (no navigation needed here;
-// the email pipeline navigates on its own).
-func (j *EmailExtractJob) BrowserActions(_ context.Context, page scrapemate.BrowserPage) scrapemate.Response {
-	j.browserPage = page
+// BrowserActions runs the email pipeline while the browser page is owned
+// exclusively. scrapemate recycles the page back into its pool the moment this
+// returns, so Level 3 navigation MUST happen here, not in Process. Running it
+// in Process drives a page that another worker may already be using, which
+// intermittently deadlocks the Playwright driver and stalls every worker.
+func (j *EmailExtractJob) BrowserActions(ctx context.Context, page scrapemate.BrowserPage) scrapemate.Response {
+	var fetcher BrowserFetcher
+	if page != nil {
+		fetcher = &pageBrowserFetcher{page: page}
+	}
+
+	j.runPipeline(ctx, fetcher)
 
 	return scrapemate.Response{StatusCode: 200}
 }
@@ -82,13 +89,25 @@ func (j *EmailExtractJob) Process(ctx context.Context, resp *scrapemate.Response
 		}
 	}()
 
+	// In non-JS mode BrowserActions is never invoked, so run the HTTP-only
+	// pipeline here. In JS mode it already ran during BrowserActions and this
+	// is a no-op.
+	j.runPipeline(ctx, nil)
+
+	return j.Entry, nil, nil
+}
+
+// runPipeline executes the email pipeline exactly once. fetcher is non-nil only
+// when a browser page is available (JS mode), enabling Level 3 rendering.
+func (j *EmailExtractJob) runPipeline(ctx context.Context, fetcher BrowserFetcher) {
+	if j.pipelineRan {
+		return
+	}
+
+	j.pipelineRan = true
+
 	log := scrapemate.GetLoggerFromContext(ctx)
 	log.Info("Processing email pipeline", "url", j.URL)
-
-	var fetcher BrowserFetcher
-	if j.browserPage != nil {
-		fetcher = &pageBrowserFetcher{page: j.browserPage}
-	}
 
 	pipeline := NewEmailPipeline(j.Entry, fetcher)
 
@@ -104,8 +123,6 @@ func (j *EmailExtractJob) Process(ctx context.Context, resp *scrapemate.Response
 		"status", j.Entry.EmailStatus,
 		"source", j.Entry.EmailSource,
 	)
-
-	return j.Entry, nil, nil
 }
 
 func (j *EmailExtractJob) ProcessOnFetchError() bool {

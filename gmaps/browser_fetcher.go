@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gosom/scrapemate"
+	"github.com/playwright-community/playwright-go"
 )
 
 const browserFetchTimeout = 15 * time.Second
@@ -17,13 +18,7 @@ type pageBrowserFetcher struct {
 	page scrapemate.BrowserPage
 }
 
-// browserResult carries the result of a browser fetch from a goroutine.
-type browserResult struct {
-	html string
-	err  error
-}
-
-func (f *pageBrowserFetcher) FetchWithBrowser(ctx context.Context, url string) (string, error) {
+func (f *pageBrowserFetcher) FetchWithBrowser(ctx context.Context, url string) (result string, err error) {
 	if f.page == nil {
 		return "", fmt.Errorf("browser page is nil, cannot fetch %s", url)
 	}
@@ -34,42 +29,32 @@ func (f *pageBrowserFetcher) FetchWithBrowser(ctx context.Context, url string) (
 	default:
 	}
 
-	// Run browser navigation in a goroutine so we can:
-	// 1. Enforce a timeout (page.Goto with WaitUntilNetworkIdle can hang)
-	// 2. Recover from panics when the underlying playwright page has been
-	//    closed or recycled by scrapemate's browser pool between Fetch and Process.
-	ch := make(chan browserResult, 1)
+	// Bound every page operation. page.Goto with WaitUntilNetworkIdle can
+	// otherwise hang on Playwright's 30s+ default. Setting the timeout on the
+	// underlying page lets the calls below stay SYNCHRONOUS: when this function
+	// returns, no operation is still in flight on the page. That is essential
+	// because the page is recycled into scrapemate's pool the instant
+	// BrowserActions returns — a leaked goroutine still driving the page would
+	// corrupt the next job that reuses it.
+	if pw, ok := f.page.Unwrap().(playwright.Page); ok {
+		pw.SetDefaultNavigationTimeout(float64(browserFetchTimeout.Milliseconds()))
+		pw.SetDefaultTimeout(float64(browserFetchTimeout.Milliseconds()))
+	}
 
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				ch <- browserResult{"", fmt.Errorf("browser page panic (page likely recycled): %v", r)}
-			}
-		}()
-
-		_, err := f.page.Goto(url, scrapemate.WaitUntilNetworkIdle)
-		if err != nil {
-			ch <- browserResult{"", err}
-
-			return
+	// Recover from panics raised when the underlying Playwright page has been
+	// closed or recycled by scrapemate's browser pool between jobs.
+	defer func() {
+		if r := recover(); r != nil {
+			result = ""
+			err = fmt.Errorf("browser page panic (page likely recycled): %v", r)
 		}
-
-		f.page.WaitForTimeout(500 * time.Millisecond)
-
-		html, err := f.page.Content()
-		ch <- browserResult{html, err}
 	}()
 
-	// Use the shorter of the context deadline and browserFetchTimeout.
-	timer := time.NewTimer(browserFetchTimeout)
-	defer timer.Stop()
-
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	case <-timer.C:
-		return "", fmt.Errorf("browser fetch timeout for %s", url)
-	case r := <-ch:
-		return r.html, r.err
+	if _, gotoErr := f.page.Goto(url, scrapemate.WaitUntilNetworkIdle); gotoErr != nil {
+		return "", gotoErr
 	}
+
+	f.page.WaitForTimeout(500 * time.Millisecond)
+
+	return f.page.Content()
 }
