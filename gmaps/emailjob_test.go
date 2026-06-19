@@ -17,7 +17,8 @@ import (
 // only touches the page at Level 3, which these tests never reach (emails are
 // found earlier via HTTP), so the navigation methods are not expected to run.
 type fakeBrowserPage struct {
-	gotoCalls int
+	gotoCalls  int
+	closeCalls int
 }
 
 func (f *fakeBrowserPage) Goto(string, scrapemate.WaitUntilState) (*scrapemate.PageResponse, error) {
@@ -34,7 +35,7 @@ func (f *fakeBrowserPage) WaitForURL(string, time.Duration) error       { return
 func (f *fakeBrowserPage) WaitForSelector(string, time.Duration) error  { return nil }
 func (f *fakeBrowserPage) WaitForTimeout(time.Duration)                 {}
 func (f *fakeBrowserPage) Locator(string) scrapemate.Locator            { return nil }
-func (f *fakeBrowserPage) Close() error                                 { return nil }
+func (f *fakeBrowserPage) Close() error                                 { f.closeCalls++; return nil }
 func (f *fakeBrowserPage) Unwrap() any                                  { return nil }
 
 func homepageWithEmailServer(t *testing.T) *httptest.Server {
