@@ -21,7 +21,7 @@ RUN export PATH=$PATH:/usr/local/go/bin:/root/go/bin \
     && apt-get install -y --no-install-recommends nodejs \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
-    && go install github.com/playwright-community/playwright-go/cmd/playwright@latest \
+    && go install github.com/playwright-community/playwright-go/cmd/playwright@v0.5700.1 \
     && mkdir -p /opt/browsers \
     && playwright install chromium --with-deps
 

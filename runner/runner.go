@@ -123,7 +123,7 @@ func ParseConfig() *Config {
 	flag.IntVar(&cfg.Zoom, "zoom", 15, "set zoom level (0-21) for search")
 	flag.BoolVar(&cfg.WebRunner, "web", false, "run web server instead of crawling")
 	flag.StringVar(&cfg.DataFolder, "data-folder", "webdata", "data folder for web runner")
-	flag.StringVar(&proxies, "proxies", "", "comma separated list of proxies to use in the format protocol://user:pass@host:port example: socks5://localhost:9050 or http://user:pass@localhost:9050")
+	flag.StringVar(&proxies, "proxies", "", "comma separated list of proxies to use in the format protocol://user:pass@host:port example: socks5://localhost:9050 or http://user:pass@localhost:9050 (falls back to the PROXIES environment variable if unset)")
 	flag.BoolVar(&cfg.AwsLamdbaRunner, "aws-lambda", false, "run as AWS Lambda function")
 	flag.BoolVar(&cfg.AwsLambdaInvoker, "aws-lambda-invoker", false, "run as AWS Lambda invoker")
 	flag.StringVar(&cfg.FunctionName, "function-name", "", "AWS Lambda function name")
@@ -210,6 +210,10 @@ func ParseConfig() *Config {
 
 	if cfg.Dsn == "" && cfg.ProduceOnly {
 		panic("Dsn must be provided when using ProduceOnly")
+	}
+
+	if proxies == "" {
+		proxies = os.Getenv("PROXIES")
 	}
 
 	if proxies != "" {
