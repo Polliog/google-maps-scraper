@@ -18,6 +18,19 @@ Use `-proxies` with a comma-separated list:
 
 Supported protocols: `socks5`, `socks5h`, `http`, `https`.
 
+### Default proxies via environment variable
+
+If the `-proxies` flag is not set, the scraper falls back to the `PROXIES`
+environment variable (same comma-separated format). This is handy for setting a
+default proxy once — e.g. in Docker — without repeating the flag on every run.
+
+Precedence: `-proxies` flag > `PROXIES` env var > no proxy.
+
+```bash
+export PROXIES="http://user:pass@host:port"
+./google-maps-scraper -input queries.txt -results results.csv -depth 1
+```
+
 ## Docker Example
 
 ```bash
@@ -33,6 +46,17 @@ docker run \
   -depth 1 \
   -proxies "http://user:pass@host:port,socks5://host:port" \
   -exit-on-inactivity 3m
+```
+
+Or set a default proxy for the container with `-e PROXIES=...` instead of the flag:
+
+```bash
+docker run -d \
+  -v "$PWD/gmapsdata:/gmapsdata" \
+  -p 8999:8080 \
+  -e PROXIES="http://user:pass@host:port" \
+  gosom/google-maps-scraper \
+  -data-folder /gmapsdata
 ```
 
 ## Current Proxy Sponsors
