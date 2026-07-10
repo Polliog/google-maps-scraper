@@ -141,7 +141,7 @@ func ParseConfig() *Config {
 	flag.StringVar(&cfg.GridBBox, "grid-bbox", "", "bounding box for grid scraping: 'minLat,minLon,maxLat,maxLon' (e.g. '40.30,-3.80,40.50,-3.60')")
 	flag.Float64Var(&cfg.GridCellKm, "grid-cell", 1.0, "grid cell size in km [default: 1.0]. Use with -grid-bbox")
 	flag.IntVar(&cfg.BrowserPoolSize, "browser-pool-size", 0, "number of browser contexts for JS mode; 0 derives from concurrency and pages-per-browser")
-	flag.IntVar(&cfg.MaxPagesPerBrowser, "pages-per-browser", 1, "maximum concurrent pages per browser context in JS mode")
+	flag.IntVar(&cfg.MaxPagesPerBrowser, "pages-per-browser", 2, "maximum concurrent pages per browser context in JS mode. Must be >1 to route fetches through scrapemate's time-bounded page.Close() path (v1.2.1+), which frees the worker when a wedged Playwright driver would otherwise hang page.Close() forever")
 	flag.BoolVar(&cfg.Version, "version", false, "returns the version of the tool")
 
 	flag.Parse()
